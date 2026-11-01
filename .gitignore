@@ -1,0 +1,16 @@
+# Local operating-system files
+.DS_Store
+
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+
+# Private practice material and scratch files
+private/
+recordings/
+work/
+node_modules/
+dist/
+coverage/
+*.log

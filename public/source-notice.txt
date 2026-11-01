@@ -1,0 +1,16 @@
+ChoirStar 0.1
+Licensed under GNU AGPL-3.0-only.
+
+Includes OpenVox Studio code, Copyright © 2026 Vadym Yemelianov / AuthorChe.
+https://github.com/vadymyem/OpenVox
+Upstream commit: ce7f85eb8279d910ee01cd16aa97707bb2bccaf0
+
+Corresponding source, build instructions and provenance:
+https://github.com/MU2026/ChoirStar
+The published application's Source code link points to the exact source revision used for its build.
+Local development source is available in the ChoirStar project directory.
+
+Third-party runtime license texts are included in licenses/ alongside this file.
+Imported scores, singer profiles and recordings are processed and stored in your browser, not uploaded by ChoirStar. GitHub hosts the static application and handles ordinary web requests. No repertoire or recordings are bundled.
+
+ChoirStar is an independent derivative project, not an official OpenVox distribution.

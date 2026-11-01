@@ -1,0 +1,9 @@
+ChoirStar
+Independent choir practice application, licensed under GNU AGPL-3.0-only.
+
+Includes unmodified OpenVox Studio source:
+Copyright © 2026 Vadym Yemelianov / AuthorChe
+https://github.com/vadymyem/OpenVox
+See docs/upstream.md and src/vendor/openvox/NOTICE.
+
+Third-party runtime package licenses are preserved in public/licenses/.

@@ -1,0 +1,30 @@
+{
+  "name": "choirstar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@tonejs/midi": "2.0.28",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@xmldom/xmldom": "^0.9.12",
+    "fake-indexeddb": "6.2.7",
+    "prettier": "3.9.10",
+    "typescript": "7.0.2",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
+  }
+}
