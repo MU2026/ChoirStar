@@ -99,6 +99,7 @@ export default function App() {
     >("prepare");
   const [notice, setNotice] = useState(""),
     [error, setError] = useState(""),
+    [deleting, setDeleting] = useState(false),
     [running, setRunning] = useState(false),
     [starting, setStarting] = useState(false),
     [record, setRecord] = useState(false),
@@ -472,6 +473,37 @@ export default function App() {
     setSamples([]);
     setLast(null);
   }
+  async function removePiece(p: Piece) {
+    if (
+      deleting ||
+      !confirm(
+        `Delete “${p.title}” from this browser?\n\nThis also deletes its practice results, settings and recordings for all singers. Exported files are not affected. This cannot be undone.`,
+      )
+    )
+      return;
+    setDeleting(true);
+    setError("");
+    const operation = writes.current.then(async () => {
+      const next = await store.deletePiece(libRef.current, p.id);
+      libRef.current = next;
+      setLib(next);
+      if (pieceId === p.id) {
+        selectPiece(next.pieces[0]?.id || "");
+        setFrame(null);
+      }
+      if (last?.piece === p.id) setLast(null);
+      setRecordingURL("");
+      setNotice(`Deleted “${p.title}”.`);
+    });
+    writes.current = operation.catch(() => {});
+    try {
+      await operation;
+    } catch (e) {
+      setError("Could not delete piece: " + message(e));
+    } finally {
+      setDeleting(false);
+    }
+  }
   function mix(id: string, patch: Partial<Settings["mix"][string]>) {
     if (!settings) return;
     const m = { ...settings.mix[id], ...patch };
@@ -762,7 +794,12 @@ export default function App() {
     settingsTrigger.current?.focus();
   };
   return (
-    <div ref={root} className={"app " + (screen === "practice" ? "focus" : "")}>
+    <div
+      ref={root}
+      inert={deleting || undefined}
+      aria-busy={deleting}
+      className={"app " + (screen === "practice" ? "focus" : "")}
+    >
       {screen !== "practice" && (
         <header>
           <a
@@ -923,25 +960,46 @@ export default function App() {
               <h2>Your pieces</h2>
               <div className="piece-cards">
                 {lib.pieces.map((p) => (
-                  <button
-                    key={p.id}
-                    className="piece-card"
-                    aria-pressed={pieceId === p.id}
-                    onClick={() => selectPiece(p.id)}
-                  >
-                    <span className="piece-symbol" aria-hidden="true">
-                      ♫
-                    </span>
-                    <span>
-                      <strong>{p.title}</strong>
-                      <small>
-                        {p.parts.length} parts · {p.bars.length} bars
-                      </small>
-                    </span>
-                    <span aria-hidden="true">
-                      {pieceId === p.id ? "✓" : "→"}
-                    </span>
-                  </button>
+                  <div key={p.id} className="piece-row">
+                    <button
+                      className="piece-card"
+                      aria-pressed={pieceId === p.id}
+                      onClick={() => selectPiece(p.id)}
+                    >
+                      <span className="piece-symbol" aria-hidden="true">
+                        ♫
+                      </span>
+                      <span>
+                        <strong>{p.title}</strong>
+                        <small>
+                          {p.parts.length} parts · {p.bars.length} bars
+                        </small>
+                      </span>
+                      <span aria-hidden="true">
+                        {pieceId === p.id ? "✓" : "→"}
+                      </span>
+                    </button>
+                    <button
+                      className="delete-piece"
+                      aria-label={`Delete ${p.title}`}
+                      title={`Delete ${p.title}`}
+                      onClick={() => void removePiece(p)}
+                    >
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" />
+                      </svg>
+                    </button>
+                  </div>
                 ))}
               </div>
               {!piece && (

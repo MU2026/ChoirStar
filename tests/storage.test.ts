@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { demoPiece, defaults, type Library } from "../src/model";
 import {
   persist,
@@ -7,6 +7,7 @@ import {
   putRecording,
   getRecording,
   deleteRecording,
+  deletePiece,
   restore,
   parseBackup,
 } from "../src/storage";
@@ -91,4 +92,73 @@ it("rejects incomplete mixes and duplicate identities before import", () => {
   l.settings = {};
   l.profiles.push({ ...l.profiles[0] });
   expect(() => parseBackup(encode())).toThrow("Duplicate");
+});
+
+it("deletes a piece across singers while preserving other pieces and recordings", async () => {
+  const l = fixture();
+  const removed = l.pieces[0];
+  const kept = { ...demoPiece(), id: "kept" };
+  l.pieces.push(kept);
+  l.profiles.push({ id: "alto", name: "Alto" });
+  l.settings[`alto:${removed.id}`] = defaults(removed);
+  l.settings[`bass:${kept.id}`] = defaults(kept);
+  l.attempts.push({
+    ...l.attempts[0],
+    id: "b",
+    profile: "alto",
+    recording: "r2",
+  });
+  l.attempts.push({
+    ...l.attempts[0],
+    id: "c",
+    piece: kept.id,
+    recording: "keep",
+  });
+  await persist(l);
+  for (const id of ["r", "r2", "keep"]) await putRecording(id, new Blob([id]));
+  const next = await deletePiece(l, removed.id);
+  expect(next.pieces.map((p) => p.id)).toEqual([kept.id]);
+  expect(next.profiles).toEqual(l.profiles);
+  expect(Object.keys(next.settings)).toEqual([`bass:${kept.id}`]);
+  expect(next.attempts.map((a) => a.id)).toEqual(["c"]);
+  expect(await getRecording("r")).toBeUndefined();
+  expect(await getRecording("r2")).toBeUndefined();
+  expect((await getRecording("keep"))?.size).toBe(4);
+  expect(await load()).toEqual(next);
+  const empty = await deletePiece(next, kept.id);
+  expect(empty.pieces).toEqual([]);
+  expect(empty.attempts).toEqual([]);
+  expect(empty.settings).toEqual({});
+  expect(() =>
+    parseBackup(
+      JSON.stringify({
+        format: "ChoirStar backup",
+        library: empty,
+        recordings: {},
+      }),
+    ),
+  ).not.toThrow();
+});
+
+it("rolls back the library when recording deletion fails", async () => {
+  const l = fixture();
+  await persist(l);
+  await putRecording("r", new Blob(["voice"]));
+  const original = IDBObjectStore.prototype.delete;
+  const fail = vi
+    .spyOn(IDBObjectStore.prototype, "delete")
+    .mockImplementation(function (this: IDBObjectStore, key) {
+      if (this.name === "recordings")
+        throw new Error("Simulated storage failure");
+      return original.call(this, key);
+    });
+  try {
+    await expect(deletePiece(l, l.pieces[0].id)).rejects.toThrow(
+      "Simulated storage failure",
+    );
+  } finally {
+    fail.mockRestore();
+  }
+  expect(await load()).toEqual(l);
+  expect((await getRecording("r"))?.size).toBe(5);
 });

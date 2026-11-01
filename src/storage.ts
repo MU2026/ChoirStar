@@ -160,6 +160,46 @@ export const getRecording = (id: string) =>
   op<Blob | undefined>("recordings", "readonly", (s) => s.get(id));
 export const deleteRecording = (id: string) =>
   op("recordings", "readwrite", (s) => s.delete(id));
+/** Remove a piece and its dependent local data in one transaction. */
+export async function deletePiece(
+  lib: Library,
+  pieceId: string,
+): Promise<Library> {
+  const attempts = lib.attempts.filter((a) => a.piece !== pieceId);
+  const next: Library = {
+    ...lib,
+    pieces: lib.pieces.filter((p) => p.id !== pieceId),
+    settings: Object.fromEntries(
+      Object.entries(lib.settings).filter(
+        ([key]) => key.split(":")[1] !== pieceId,
+      ),
+    ),
+    attempts,
+  };
+  const retained = new Set(attempts.map((a) => a.recording));
+  const recordings = new Set(
+    lib.attempts
+      .filter(
+        (a) => a.piece === pieceId && a.recording && !retained.has(a.recording),
+      )
+      .map((a) => a.recording!),
+  );
+  const database = await db();
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction(["state", "recordings"], "readwrite");
+    tx.oncomplete = () => resolve(next);
+    tx.onabort = () =>
+      reject(tx.error || new Error("Piece deletion was not saved."));
+    tx.onerror = () => reject(tx.error);
+    try {
+      tx.objectStore("state").put(next, "library");
+      for (const id of recordings) tx.objectStore("recordings").delete(id);
+    } catch (error) {
+      tx.abort();
+      reject(error);
+    }
+  });
+}
 export function download(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob),
     a = document.createElement("a");
