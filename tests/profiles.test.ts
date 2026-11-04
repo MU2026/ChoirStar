@@ -1,7 +1,30 @@
 import { it, expect } from "vitest";
-import { removeUnusedDefaultSingers } from "../src/profiles";
+import {
+  ensurePracticeProfile,
+  removeUnusedDefaultSingers,
+} from "../src/profiles";
 import { demoPiece, defaults, type Library } from "../src/model";
 import { parseBackup } from "../src/storage";
+it("starts practice without singer setup and preserves existing profile ownership", () => {
+  const empty: Library = {
+    version: 1,
+    profiles: [],
+    pieces: [],
+    settings: {},
+    attempts: [],
+  };
+  const next = ensurePracticeProfile(empty);
+  expect(next.profiles).toHaveLength(1);
+  expect(next.profiles[0].name).toBe("Local practice");
+  expect(next.profiles[0].id).toBeTruthy();
+  expect(empty.profiles).toEqual([]);
+  expect(ensurePracticeProfile(next)).toBe(next);
+  const existing = {
+    ...empty,
+    profiles: [{ id: "custom", name: "Existing singer" }],
+  };
+  expect(ensurePracticeProfile(existing)).toBe(existing);
+});
 it("removes unused presets and their settings but preserves repertoire and custom singers", () => {
   const p = demoPiece();
   const l: Library = {

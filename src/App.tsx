@@ -1,14 +1,17 @@
-import { WebsiteLibrary } from "./WebsiteLibrary";
+import { WebsiteImportDialog } from "./WebsiteImportDialog";
+import { PieceLibrary } from "./PieceLibrary";
+import { libraryLayout } from "./piece-library";
 import type { WebsiteCatalogue, WebsiteEntry } from "./website";
-import { removeUnusedDefaultSingers } from "./profiles";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ensurePracticeProfile } from "./profiles";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AudioSession, type Frame } from "./audio";
+import { INSTRUMENTS, type Instrument } from "./instruments";
+import { SpeedControl } from "./SpeedControl";
+import { ImportWarnings } from "./ImportWarnings";
 import {
   assess,
   barAt,
   defaults,
-  demoPiece,
-  importMidi,
   secondsAt,
   suggestions,
   tickAt,
@@ -22,7 +25,7 @@ import {
 import * as store from "./storage";
 import { noteLabel } from "./vendor/openvox/core/music/notes";
 import { Score } from "./views";
-import { importMusicXml } from "./musicxml";
+import { importScore } from "./score-import";
 const initial: Library = {
   version: 1,
   profiles: [],
@@ -48,8 +51,10 @@ function TransportIcon({
     >
       {kind === "sing" ? (
         <>
-          <rect x="9" y="2" width="6" height="12" rx="3" />
-          <path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" />
+          <circle cx="9" cy="6" r="3" />
+          <path d="M3 21v-3a6 6 0 0 1 12 0v3M11 7h2M18 5v8M18 5l4-1v7" />
+          <ellipse cx="16.5" cy="14" rx="1.5" ry="1" />
+          <ellipse cx="20.5" cy="12" rx="1.5" ry="1" />
         </>
       ) : kind === "listen" ? (
         <path d="m7 3 14 9-14 9z" fill="currentColor" />
@@ -63,7 +68,7 @@ function TransportIcon({
     </svg>
   );
 }
-function SettingsIcon({ kind }: { kind: "tracks" | "audio" | "close" }) {
+function SettingsIcon({ kind }: { kind: "audio" | "close" }) {
   return (
     <svg
       width="23"
@@ -75,12 +80,7 @@ function SettingsIcon({ kind }: { kind: "tracks" | "audio" | "close" }) {
       strokeLinecap="round"
       aria-hidden="true"
     >
-      {kind === "tracks" ? (
-        <>
-          <path d="M4 3v18M12 3v18M20 3v18" />
-          <path d="M1 8h6M9 16h6M17 9h6" strokeWidth="4" />
-        </>
-      ) : kind === "audio" ? (
+      {kind === "audio" ? (
         <>
           <rect x="9" y="2" width="6" height="12" rx="3" />
           <path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" />
@@ -111,13 +111,34 @@ export default function App() {
     [time, setTime] = useState(0),
     [frame, setFrame] = useState<Frame | null>(null),
     [samples, setSamples] = useState<Sample[]>([]),
-    [drawer, setDrawer] = useState<"tracks" | "audio" | null>(null),
+    [drawer, setDrawer] = useState<"audio" | null>(null),
     [last, setLast] = useState<Attempt | null>(null),
     [recordingURL, setRecordingURL] = useState(""),
     [recordingType, setRecordingType] = useState(""),
     [includeAudio, setIncludeAudio] = useState(false),
-    [newProfile, setNewProfile] = useState(""),
     [showWebsites, setShowWebsites] = useState(false);
+  const importMenu = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const dismiss = (event: PointerEvent | KeyboardEvent) => {
+      const menu = importMenu.current;
+      if (!menu?.open) return;
+      if (event instanceof KeyboardEvent) {
+        if (event.key !== "Escape") return;
+        menu.open = false;
+        menu.querySelector("summary")?.focus();
+      } else if (!menu.contains(event.target as Node)) menu.open = false;
+    };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", dismiss);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", dismiss);
+    };
+  }, []);
+  const layout = useMemo(
+    () => libraryLayout(lib),
+    [lib.pieces, lib.websites, lib.layout],
+  );
   const libRef = useRef(lib);
   libRef.current = lib;
   const engine = useRef(new AudioSession());
@@ -176,13 +197,11 @@ export default function App() {
     store
       .load()
       .then((l) => {
-        if (l) {
-          const next = removeUnusedDefaultSingers(l);
-          if (next !== l) update(next);
-          else setLib(next);
-          setProfile(next.profiles[0]?.id || "");
-          setPieceId(next.pieces[0]?.id || "");
-        }
+        const next = ensurePracticeProfile(l || initial);
+        if (next !== l) update(next);
+        else setLib(next);
+        setProfile(next.profiles[0].id);
+        setPieceId(next.pieces[0]?.id || "");
         setLoaded(true);
       })
       .catch((e) => {
@@ -247,13 +266,7 @@ export default function App() {
       throw new Error(
         "The library limit is 200 pieces. Delete unused pieces before importing more.",
       );
-    if (f.size > 20 * 1024 * 1024)
-      throw new Error("Score files must be smaller than 20 MB.");
-    if (!/\.(mid|midi|musicxml|xml)$/i.test(f.name))
-      throw new Error("Choose a MIDI or uncompressed MusicXML file.");
-    const p = /\.(musicxml|xml)$/i.test(f.name)
-      ? importMusicXml(await f.text(), f.name)
-      : importMidi(await f.arrayBuffer(), f.name);
+    const p = await importScore(f);
     p.website = {
       url: entry.url,
       page: catalogue.url,
@@ -269,31 +282,17 @@ export default function App() {
   async function importFile(f: File) {
     try {
       setError("");
-      if (f.size > 20 * 1024 * 1024)
-        throw new Error("Score files must be smaller than 20 MB.");
-      if (/\.mxl$/i.test(f.name))
-        throw new Error(
-          "Compressed MusicXML is not supported yet. Export an uncompressed .musicxml file.",
-        );
-      const isXml = /\.(musicxml|xml)$/i.test(f.name);
-      const p = isXml
-        ? importMusicXml(await f.text(), f.name)
-        : importMidi(await f.arrayBuffer(), f.name);
+      const p = await importScore(f);
       update({ ...libRef.current, pieces: [...libRef.current.pieces, p] });
       setPieceId(p.id);
       setTime(0);
+      setScreen("prepare");
       setNotice(
-        `Imported ${p.parts.length} parts. ${isXml ? "MusicXML practice notation imported." : "MIDI notation is reconstructed; compare it with your score."} ${(p.importWarnings || []).join(" ")}`,
+        `Imported ${p.parts.length} parts. ${p.source === "midi" ? "MIDI notation is reconstructed; compare it with your score." : "Practice notation imported."} ${(p.importWarnings || []).join(" ")}`,
       );
     } catch (e) {
       setError(message(e));
     }
-  }
-  function demo() {
-    const p = demoPiece();
-    update({ ...libRef.current, pieces: [...libRef.current.pieces, p] });
-    setPieceId(p.id);
-    setTime(0);
   }
   async function inputAccess() {
     try {
@@ -504,28 +503,52 @@ export default function App() {
     );
     setSamples([]);
     setLast(null);
+    setFrame(null);
+    setDrawer(null);
+    setScreen("practice");
   }
-  async function removePiece(p: Piece) {
+  async function removePiece(itemId: string) {
+    if (deleting) return;
+    const currentLayout = layout;
+    const item = currentLayout.items.find(
+      (n) => n.id === itemId && n.type === "piece",
+    );
+    const p = libRef.current.pieces.find((p) => p.id === item?.pieceId);
+    if (!p || !item) return;
+    const lastReference =
+      currentLayout.items.filter((n) => n.pieceId === p.id).length === 1;
     if (
-      deleting ||
+      lastReference &&
       !confirm(
-        `Delete “${p.title}” from this browser?\n\nThis also deletes its practice results, settings and recordings for all singers. Exported files are not affected. This cannot be undone.`,
+        `Remove the last reference to “${item.title}”?\n\nThis deletes the stored score and all its practice results, settings and recordings from this browser. Exported files are not affected. This cannot be undone.`,
       )
     )
       return;
     setDeleting(true);
     setError("");
     const operation = writes.current.then(async () => {
-      const next = await store.deletePiece(libRef.current, p.id);
+      const next = await store.deleteLibraryAppearance(
+        { ...libRef.current, layout: currentLayout },
+        itemId,
+      );
       libRef.current = next;
       setLib(next);
-      if (pieceId === p.id) {
-        selectPiece(next.pieces[0]?.id || "");
+      const removed = !next.pieces.some((piece) => piece.id === p.id);
+      if (removed && pieceId === p.id) {
+        setPieceId(next.pieces[0]?.id || "");
+        setTime(0);
+        setSamples([]);
         setFrame(null);
       }
-      if (last?.piece === p.id) setLast(null);
-      setRecordingURL("");
-      setNotice(`Deleted “${p.title}”.`);
+      if (removed) {
+        if (last?.piece === p.id) setLast(null);
+        setRecordingURL("");
+      }
+      setNotice(
+        removed
+          ? `Deleted “${item.title}” and its stored practice data.`
+          : `Removed “${item.title}” from this list. Other references and practice data were kept.`,
+      );
     });
     writes.current = operation.catch(() => {});
     try {
@@ -614,64 +637,31 @@ export default function App() {
       ? Math.max(time, secondsAt(piece, piece.bars[settings.from].start))
       : time;
   const disabled = running || starting;
-  const profileName = lib.profiles.find((p) => p.id === profile)?.name;
-  const partsPanel = piece && settings && (
-    <div className="parts-list">
-      {piece.importWarnings?.map((w) => (
-        <p className="muted" key={w}>
-          {w}
-        </p>
-      ))}
-      <label>
-        My part
-        <select
-          disabled={disabled}
-          value={settings.part}
-          onChange={(e) => change({ part: e.target.value })}
-        >
-          {piece.parts.map((p) => (
-            <option value={p.id} key={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      </label>{" "}
-      {piece.parts.map((p) => (
-        <div
-          className={"track " + (p.id === settings.part ? "selected" : "")}
-          key={p.id}
-        >
-          <span>{p.name}</span>
-          <input
-            aria-label={`${p.name} volume`}
-            type="range"
-            min="0"
-            max="100"
-            value={Math.round((settings.mix[p.id]?.volume ?? 0.6) * 100)}
-            onChange={(e) =>
-              mix(p.id, { volume: Number(e.target.value) / 100 })
-            }
-          />
-          <button
-            aria-pressed={settings.mix[p.id]?.mute || false}
-            onClick={() => mix(p.id, { mute: !settings.mix[p.id]?.mute })}
-          >
-            {settings.mix[p.id]?.mute ? "Muted" : "Mute"}
-          </button>
-        </div>
-      ))}
-      <p className="muted">
-        Collapse staves using their name in the score. Muting does not change
-        your assessed part.
-      </p>
-    </div>
-  );
   const audioPanel = piece && settings && (
     <>
       {disabled && (
         <p className="muted">Stop the practice to change audio settings.</p>
       )}
       <fieldset disabled={disabled} className="audio-controls">
+        <label className="field">
+          Playback instrument
+          <select
+            value={settings.instrument ?? "piano"}
+            onChange={(e) =>
+              change({ instrument: e.target.value as Instrument })
+            }
+          >
+            {INSTRUMENTS.map((instrument) => (
+              <option key={instrument.id} value={instrument.id}>
+                {instrument.name}
+              </option>
+            ))}
+          </select>
+          <small className="muted">
+            Synthesized sounds for all parts and starting notes. Choir, organ
+            and strings sustain long notes.
+          </small>
+        </label>
         <label className="field">
           Listening setup
           <select
@@ -845,6 +835,29 @@ export default function App() {
             ChoirStar <span>✦</span>
           </a>
           <span className="tag">LOCAL PRACTICE · 0.1</span>
+          <details className="import-menu" ref={importMenu}>
+            <summary>Import</summary>
+            <div className="import-options">
+              <button
+                disabled={!loaded}
+                onClick={() => {
+                  importMenu.current?.removeAttribute("open");
+                  file.current?.click();
+                }}
+              >
+                Local File
+              </button>
+              <button
+                disabled={!loaded}
+                onClick={() => {
+                  importMenu.current?.removeAttribute("open");
+                  setShowWebsites(true);
+                }}
+              >
+                Website
+              </button>
+            </div>
+          </details>
           <nav>
             <button
               aria-pressed={screen === "prepare"}
@@ -859,26 +872,6 @@ export default function App() {
               History & backup
             </button>
           </nav>
-          {screen !== "prepare" && (
-            <label>
-              Singer{" "}
-              <select
-                disabled={disabled}
-                value={profile}
-                onChange={(e) => {
-                  setProfile(e.target.value);
-                  setLast(null);
-                  setSamples([]);
-                }}
-              >
-                {lib.profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
         </header>
       )}
       {error && (
@@ -897,7 +890,7 @@ export default function App() {
       <input
         ref={file}
         type="file"
-        accept=".mid,.midi,.musicxml,.xml"
+        accept=".mid,.midi,.musicxml,.xml,.nwc,.nwctxt"
         hidden
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -910,198 +903,23 @@ export default function App() {
           <h1>Opening your local library…</h1>
         </main>
       ) : screen === "prepare" ? (
-        <main>
-          <div className="hero row between">
-            <div>
-              <div className="eyebrow">YOUR VOICE. YOUR PART.</div>
-              <h1>Make the harmony yours.</h1>
-              <p className="muted">
-                Choose your singer and a piece. Your rehearsal is one step away.
-              </p>
-            </div>
-            <div className="row">
-              <button onClick={demo}>Try 12-part study</button>
-              <button
-                aria-expanded={showWebsites}
-                onClick={() => setShowWebsites(!showWebsites)}
-              >
-                Website library
-              </button>
-              <button className="primary" onClick={() => file.current?.click()}>
-                Import score
-              </button>
-            </div>
-          </div>
-          <div className="library-choices">
-            <section className="singer-choice panel">
-              <div className="eyebrow">01 · WHO IS SINGING?</div>
-              <h2>Your singer</h2>
-              <div className="singer-cards">
-                {lib.profiles.map((p) => (
-                  <button
-                    key={p.id}
-                    className="singer-card"
-                    aria-pressed={profile === p.id}
-                    onClick={() => {
-                      setProfile(p.id);
-                      setLast(null);
-                      setSamples([]);
-                    }}
-                  >
-                    <span className="singer-avatar" aria-hidden="true">
-                      {p.name.slice(0, 1).toUpperCase()}
-                    </span>
-                    <strong>{p.name}</strong>
-                    <span>
-                      {profile === p.id ? "Selected" : "Choose singer"}
-                    </span>
-                  </button>
-                ))}
-              </div>
-              {!lib.profiles.length && (
-                <p className="muted">
-                  Add your name to create your first singer profile.
-                </p>
-              )}
-              <details
-                className="add-singer"
-                open={lib.profiles.length === 0 ? true : undefined}
-              >
-                <summary>Add a singer</summary>
-                <form
-                  className="row"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (!newProfile.trim()) return;
-                    const p = { id: uid(), name: newProfile.trim() };
-                    update({
-                      ...libRef.current,
-                      profiles: [...libRef.current.profiles, p],
-                    });
-                    setProfile(p.id);
-                    setNewProfile("");
-                  }}
-                >
-                  <input
-                    aria-label="New singer name"
-                    placeholder="New singer name"
-                    value={newProfile}
-                    maxLength={80}
-                    onChange={(e) => setNewProfile(e.target.value)}
-                  />
-                  <button>Add singer</button>
-                </form>
-              </details>
-            </section>
-            <section className="piece-choice panel">
-              <div className="eyebrow">02 · WHAT SHALL WE SING?</div>
-              <h2>Your pieces</h2>
-              <div className="piece-cards">
-                {lib.pieces.map((p) => (
-                  <div key={p.id} className="piece-row">
-                    <button
-                      className="piece-card"
-                      aria-pressed={pieceId === p.id}
-                      onClick={() => selectPiece(p.id)}
-                    >
-                      <span className="piece-symbol" aria-hidden="true">
-                        ♫
-                      </span>
-                      <span>
-                        <strong>{p.title}</strong>
-                        <small>
-                          {p.parts.length} parts · {p.bars.length} bars
-                        </small>
-                      </span>
-                      <span aria-hidden="true">
-                        {pieceId === p.id ? "✓" : "→"}
-                      </span>
-                    </button>
-                    <button
-                      className="delete-piece"
-                      aria-label={`Delete ${p.title}`}
-                      title={`Delete ${p.title}`}
-                      onClick={() => void removePiece(p)}
-                    >
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
-                        <path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-              {!piece && (
-                <p className="muted">
-                  Import a MIDI or MusicXML file or try the 12-part study to
-                  start your first rehearsal.
-                </p>
-              )}
-              {piece && settings && (
-                <div className="practice-launch">
-                  <p>
-                    <strong>
-                      {profileName || "Add a singer to start practising"}
-                    </strong>
-                    <br />
-                    <span className="muted">
-                      {piece.title} · {currentPart?.name}
-                    </span>
-                  </p>
-                  <button
-                    className="primary"
-                    disabled={!profile}
-                    onClick={() => {
-                      setDrawer(null);
-                      setTime(
-                        secondsAt(piece, piece.bars[settings.from].start),
-                      );
-                      setScreen("practice");
-                    }}
-                  >
-                    Open practice →
-                  </button>
-                </div>
-              )}
-            </section>
-          </div>
-          {showWebsites && (
-            <WebsiteLibrary
-              catalogues={lib.websites || []}
-              imported={
-                new Set(
-                  lib.pieces.flatMap((p) => (p.website ? [p.website.url] : [])),
-                )
-              }
-              onImport={importWebsiteScore}
-              onSave={(catalogue) => {
-                const websites = libRef.current.websites || [];
-                if (
-                  !websites.some((c) => c.url === catalogue.url) &&
-                  websites.length >= 100
-                )
-                  throw new Error(
-                    "The library limit is 100 website catalogues.",
-                  );
-                update({
-                  ...libRef.current,
-                  websites: [
-                    ...websites.filter((c) => c.url !== catalogue.url),
-                    catalogue,
-                  ],
-                });
-              }}
+        <main className="library-home">
+          <section className="piece-choice panel">
+            <h2>Your pieces</h2>
+            <PieceLibrary
+              pieces={lib.pieces}
+              layout={layout}
+              onChange={(layout) => update({ ...libRef.current, layout })}
+              onSelect={selectPiece}
+              onDelete={(itemId) => void removePiece(itemId)}
             />
-          )}
+            {!lib.pieces.length && (
+              <p className="muted">
+                Use Import to add a local MIDI, MusicXML or NWC file, or choose
+                scores from a website.
+              </p>
+            )}
+          </section>
           <footer>
             Local-only storage · Clearing site data can erase your library ·{" "}
             <a href={`${import.meta.env.BASE_URL}LICENSE`} target="_blank">
@@ -1135,7 +953,7 @@ export default function App() {
             <div>
               <strong>{piece.title}</strong>
               <div className="muted">
-                {profileName} · {currentPart?.name} · Bar{" "}
+                {currentPart?.name} · Bar{" "}
                 {Math.min(
                   piece.bars.length,
                   barAt(
@@ -1158,7 +976,7 @@ export default function App() {
               ) : (
                 <>
                   <button
-                    className="icon-button primary"
+                    className="icon-button"
                     disabled={starting}
                     aria-label="Sing my part"
                     title={starting ? "Opening audio…" : "Sing my part"}
@@ -1177,21 +995,11 @@ export default function App() {
                   </button>
                 </>
               )}
-              <label className="top-speed" title="Playback speed">
-                <input
-                  aria-label="Speed"
-                  disabled={disabled}
-                  type="range"
-                  min="25"
-                  max="200"
-                  step="5"
-                  value={Math.round(settings.speed * 100)}
-                  onChange={(e) =>
-                    change({ speed: Number(e.target.value) / 100 })
-                  }
-                />
-                <output>{Math.round(settings.speed * 100)}%</output>
-              </label>
+              <SpeedControl
+                speed={settings.speed}
+                disabled={disabled}
+                onChange={(speed) => change({ speed })}
+              />
               <button
                 className="icon-button"
                 disabled={disabled}
@@ -1210,19 +1018,7 @@ export default function App() {
               </span>
             </div>
             <div className="row">
-              <button
-                className="icon-button"
-                aria-label="Track settings"
-                title="Track settings"
-                aria-expanded={drawer === "tracks"}
-                aria-controls="practice-settings"
-                onClick={(e) => {
-                  settingsTrigger.current = e.currentTarget;
-                  setDrawer(drawer === "tracks" ? null : "tracks");
-                }}
-              >
-                <SettingsIcon kind="tracks" />
-              </button>
+              <ImportWarnings key={piece.id} warnings={piece.importWarnings} />
               <button
                 className="icon-button"
                 aria-label="Audio settings"
@@ -1259,9 +1055,7 @@ export default function App() {
               id="practice-settings"
               className="drawer"
               role="region"
-              aria-label={
-                drawer === "tracks" ? "Track settings" : "Audio settings"
-              }
+              aria-label="Audio settings"
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
                   e.stopPropagation();
@@ -1270,9 +1064,7 @@ export default function App() {
               }}
             >
               <div className="settings-heading">
-                <h2>
-                  {drawer === "tracks" ? "Track settings" : "Audio settings"}
-                </h2>
+                <h2>Audio settings</h2>
                 <button
                   autoFocus
                   className="icon-button"
@@ -1283,7 +1075,7 @@ export default function App() {
                   <SettingsIcon kind="close" />
                 </button>
               </div>
-              {drawer === "tracks" ? partsPanel : audioPanel}
+              {audioPanel}
             </aside>
           )}
           <Score
@@ -1294,6 +1086,7 @@ export default function App() {
             running={running}
             playbackPosition={playbackPosition}
             onMix={mix}
+            onPart={(part) => change({ part })}
             controlsDisabled={disabled}
             onStartingNote={(part) =>
               void engine.current
@@ -1437,36 +1230,6 @@ export default function App() {
           <h1>Your practice, kept here.</h1>
           <div className="setup-grid">
             <section className="panel">
-              <h3>Singers</h3>
-              <form
-                className="row"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (!newProfile.trim()) return;
-                  const p = { id: uid(), name: newProfile.trim() };
-                  update({
-                    ...libRef.current,
-                    profiles: [...libRef.current.profiles, p],
-                  });
-                  setProfile(p.id);
-                  setNewProfile("");
-                }}
-              >
-                <input
-                  aria-label="New singer name"
-                  placeholder="New singer name"
-                  value={newProfile}
-                  maxLength={80}
-                  onChange={(e) => setNewProfile(e.target.value)}
-                />
-                <button>Add singer</button>
-              </form>
-              <p className="muted">
-                Separate histories, shared repertoire. Local profiles are not
-                password-protected accounts.
-              </p>
-            </section>
-            <section className="panel">
               <h3>Backup & restore</h3>
               <label>
                 <input
@@ -1524,62 +1287,60 @@ export default function App() {
             </section>
           </div>
           <section className="panel history">
-            <h3>{profileName} · Practice history</h3>
-            {lib.attempts.filter((a) => a.profile === profile).length ? (
-              lib.attempts
-                .filter((a) => a.profile === profile)
-                .map((a) => (
-                  <div className="review-row" key={a.id}>
-                    <div>
-                      <strong>{a.title}</strong>
-                      <p>
-                        {new Date(a.date).toLocaleString("en-GB")} · Bars{" "}
-                        {a.from + 1}–{a.to + 1}
-                      </p>
-                    </div>
-                    <div className="row">
-                      <button
-                        onClick={() => {
-                          setPieceId(a.piece);
-                          const p = libRef.current.pieces.find(
-                            (p) => p.id === a.piece,
-                          );
-                          if (p) {
-                            const k = `${profile}:${a.piece}`;
-                            update({
-                              ...libRef.current,
-                              settings: {
-                                ...libRef.current.settings,
-                                [k]: {
-                                  ...(libRef.current.settings[k] ||
-                                    defaults(p)),
-                                  part: a.part,
-                                },
-                              },
-                            });
-                          }
-                          setLast(a);
-                          setScreen("review");
-                        }}
-                      >
-                        Review
-                      </button>
-                      {a.recording && (
-                        <>
-                          <button onClick={() => void recordingAction(a)}>
-                            Play voice
-                          </button>
-                          <button onClick={() => void recordingAction(a, true)}>
-                            Export
-                          </button>
-                          <button onClick={() => void removeRecording(a)}>
-                            Delete voice
-                          </button>
-                        </>
-                      )}
-                    </div>
+            <h3>Practice history</h3>
+            {lib.attempts.length ? (
+              lib.attempts.map((a) => (
+                <div className="review-row" key={a.id}>
+                  <div>
+                    <strong>{a.title}</strong>
+                    <p>
+                      {new Date(a.date).toLocaleString("en-GB")} · Bars{" "}
+                      {a.from + 1}–{a.to + 1}
+                    </p>
                   </div>
-                ))
+                  <div className="row">
+                    <button
+                      onClick={() => {
+                        setProfile(a.profile);
+                        setPieceId(a.piece);
+                        const p = libRef.current.pieces.find(
+                          (p) => p.id === a.piece,
+                        );
+                        if (p) {
+                          const k = `${a.profile}:${a.piece}`;
+                          update({
+                            ...libRef.current,
+                            settings: {
+                              ...libRef.current.settings,
+                              [k]: {
+                                ...(libRef.current.settings[k] || defaults(p)),
+                                part: a.part,
+                              },
+                            },
+                          });
+                        }
+                        setLast(a);
+                        setScreen("review");
+                      }}
+                    >
+                      Review
+                    </button>
+                    {a.recording && (
+                      <>
+                        <button onClick={() => void recordingAction(a)}>
+                          Play voice
+                        </button>
+                        <button onClick={() => void recordingAction(a, true)}>
+                          Export
+                        </button>
+                        <button onClick={() => void removeRecording(a)}>
+                          Delete voice
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))
             ) : (
               <p>No attempts yet. Your first practice will appear here.</p>
             )}
@@ -1590,6 +1351,40 @@ export default function App() {
             )}
           </section>
         </main>
+      )}
+      {showWebsites && (
+        <WebsiteImportDialog
+          catalogues={lib.websites || []}
+          imported={
+            new Set(
+              lib.pieces.flatMap((p) => (p.website ? [p.website.url] : [])),
+            )
+          }
+          onImport={importWebsiteScore}
+          onClose={() => setShowWebsites(false)}
+          onImported={(count) => {
+            setShowWebsites(false);
+            setScreen("prepare");
+            setNotice(
+              `Imported ${count} ${count === 1 ? "score" : "scores"}. Choose a piece to practise.`,
+            );
+          }}
+          onSave={(catalogue) => {
+            const websites = libRef.current.websites || [];
+            if (
+              !websites.some((c) => c.url === catalogue.url) &&
+              websites.length >= 100
+            )
+              throw new Error("The library limit is 100 website catalogues.");
+            update({
+              ...libRef.current,
+              websites: [
+                ...websites.filter((c) => c.url !== catalogue.url),
+                catalogue,
+              ],
+            });
+          }}
+        />
       )}
     </div>
   );

@@ -107,6 +107,7 @@ export function Score({
   running,
   playbackPosition,
   onMix,
+  onPart,
   controlsDisabled,
   onStartingNote,
   onRange,
@@ -118,10 +119,24 @@ export function Score({
   running: boolean;
   playbackPosition: () => number;
   onMix: (id: string, patch: Partial<Settings["mix"][string]>) => void;
+  onPart: (part: string) => void;
   controlsDisabled: boolean;
   onStartingNote: (part: string) => void;
   onRange: (range: { from: number; to: number } | null) => void;
 }) {
+  const partChoice = (part: Piece["parts"][number]) => (
+    <label className="part-choice" title={`Practise ${part.name}`}>
+      <input
+        type="radio"
+        name="my-part"
+        checked={settings.part === part.id}
+        disabled={controlsDisabled}
+        onChange={() => onPart(part.id)}
+        aria-label={`My part: ${part.name}`}
+      />
+      <span>My part</span>
+    </label>
+  );
   const { ref, width } = useWidth();
   const [scrollBar, setScrollBar] = useState(0);
   const [pitchExpanded, setPitchExpanded] = useState(true);
@@ -453,6 +468,7 @@ export function Score({
               >
                 <div className="staff-label" style={{ width: labelWidth }}>
                   <div className="staff-mixer">
+                    {partChoice(part)}
                     <button
                       className="staff-collapse"
                       aria-label={`Collapse ${part.name} staff`}
@@ -699,15 +715,20 @@ export function Score({
               </div>
             ) : (
               <div className="collapsed-staff">
-                <button
+                <div
+                  className="collapsed-staff-label"
                   style={{ width: labelWidth }}
-                  className="staff-collapse"
-                  aria-label={`Expand ${part.name} staff`}
-                  aria-expanded="false"
-                  onClick={() => onMix(part.id, { visible: true })}
                 >
-                  <span aria-hidden="true">▸</span> {part.name}
-                </button>
+                  {partChoice(part)}
+                  <button
+                    className="staff-collapse"
+                    aria-label={`Expand ${part.name} staff`}
+                    aria-expanded="false"
+                    onClick={() => onMix(part.id, { visible: true })}
+                  >
+                    <span aria-hidden="true">▸</span> {part.name}
+                  </button>
+                </div>
               </div>
             )}
             {part.id === settings.part && (

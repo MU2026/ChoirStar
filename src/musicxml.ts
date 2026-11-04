@@ -1,3 +1,4 @@
+import { unfold, passes, type Navigation } from "./repeats";
 import {
   uid,
   type Piece,
@@ -28,15 +29,14 @@ type XmlNote = Omit<Note, "id"> & {
   tieStart: boolean;
   tieStop: boolean;
 };
-type Measure = {
+type Measure = Navigation & {
   notes: XmlNote[];
   length: number;
   meter: [number, number];
   key: number;
   tempos: Tempo[];
-  forward: boolean;
-  repeat: number;
   short: boolean;
+  forwardNext: boolean;
 };
 
 export function importMusicXml(
@@ -56,15 +56,6 @@ export function importMusicXml(
     throw new Error(
       "Open an uncompressed, partwise MusicXML file (.musicxml or .xml).",
     );
-  if (
-    root.getElementsByTagName("ending").length ||
-    Array.from(root.getElementsByTagName("sound")).some((s) =>
-      ["dacapo", "dalsegno", "tocoda", "fine"].some((a) => s.hasAttribute(a)),
-    )
-  )
-    throw new Error(
-      "Alternate endings and D.C./D.S. jumps are not supported yet. Export an unfolded score.",
-    );
   const warnings = new Set<string>();
   const ppq = 960;
   const partList = child(root, "part-list");
@@ -83,6 +74,7 @@ export function importMusicXml(
       key = 0,
       transpose = 0;
     const clefs = new Map<string, "treble" | "bass">();
+    const clefOctaves = new Map<string, number>();
     const measures = children(part, "measure");
     if (!measures.length || measures.length > 20000)
       throw new Error("Invalid or excessively long MusicXML score.");
@@ -90,6 +82,7 @@ export function importMusicXml(
       let cursor = 0,
         lastStart = 0,
         extent = 0;
+      const soundTicks = new Map<Element, number>();
       const notes: XmlNote[] = [],
         tempos: Tempo[] = [];
       for (const el of children(measure)) {
@@ -119,18 +112,24 @@ export function importMusicXml(
             const sign = value(clef, "sign"),
               staff = clef.getAttribute("number") || "1";
             const kind = sign === "F" ? "bass" : "treble";
-            if (
-              !["G", "F"].includes(sign) ||
-              value(clef, "clef-octave-change", "0") !== "0"
-            )
+            const octave = Number(value(clef, "clef-octave-change", "0"));
+            const supportedOctave = [-1, 0, 1].includes(octave);
+            if (!["G", "F"].includes(sign) || !supportedOctave)
               warnings.add(
                 "Unusual clefs are displayed using a standard treble or bass clef at sounding pitch.",
               );
-            if (clefs.has(staff) && clefs.get(staff) !== kind)
+            if (
+              clefs.has(staff) &&
+              (clefs.get(staff) !== kind ||
+                clefOctaves.get(staff) !== (supportedOctave ? octave : 0))
+            )
               warnings.add(
                 "Clef changes are displayed using the initial clef.",
               );
-            if (!clefs.has(staff)) clefs.set(staff, kind);
+            if (!clefs.has(staff)) {
+              clefs.set(staff, kind);
+              clefOctaves.set(staff, supportedOctave ? octave : 0);
+            }
           }
         } else if (el.localName === "backup" || el.localName === "forward") {
           const duration =
@@ -144,6 +143,18 @@ export function importMusicXml(
           extent = Math.max(extent, cursor);
         } else if (el.localName === "direction" || el.localName === "sound") {
           const sound = el.localName === "sound" ? el : child(el, "sound");
+          if (sound)
+            soundTicks.set(
+              sound,
+              cursor +
+                (number(
+                  value(sound, "offset", value(el, "offset", "0")),
+                  "navigation offset",
+                  -1e8,
+                ) *
+                  ppq) /
+                  divisions,
+            );
           const metro = el.getElementsByTagName("metronome")[0];
           let bpm = sound?.getAttribute("tempo")
             ? number(sound.getAttribute("tempo")!, "tempo", 1, 2000)
@@ -286,7 +297,74 @@ export function importMusicXml(
           });
         }
       }
+      const sounds = Array.from(measure.getElementsByTagName("sound"))
+        .map((el) => {
+          const result: Record<string, string> = {};
+          for (const key of [
+            "dacapo",
+            "dalsegno",
+            "segno",
+            "coda",
+            "tocoda",
+            "fine",
+            "time-only",
+          ])
+            if (el.hasAttribute(key)) result[key] = el.getAttribute(key)!;
+          if (result["time-only"]) passes(result["time-only"]);
+          const position = soundTicks.get(el) ?? 0;
+          if ((result.segno || result.coda) && Math.abs(position) > 0.001)
+            throw new Error(
+              "Segno and Coda destinations must be at the start of a measure.",
+            );
+          if (
+            ["dacapo", "dalsegno", "tocoda", "fine"].some(
+              (key) => result[key],
+            ) &&
+            Math.abs(position - extent) > 0.001
+          )
+            throw new Error(
+              "Navigation jumps and Fine must be at the end of a measure. Export split measures or an unfolded score.",
+            );
+          if (
+            ["dacapo", "dalsegno", "tocoda", "segno", "coda", "fine"].some(
+              (key) => el.hasAttribute(key) && !result[key],
+            )
+          )
+            throw new Error(
+              "Navigation instructions must name their destination.",
+            );
+          if (result.dacapo && result.dacapo !== "yes")
+            throw new Error("Invalid da capo instruction.");
+          return result;
+        })
+        .filter((s) => Object.keys(s).length);
+      const endings = Array.from(measure.getElementsByTagName("ending")).map(
+        (e) => {
+          const type = e.getAttribute("type") || "";
+          if (!["start", "stop", "discontinue"].includes(type))
+            throw new Error("Invalid repeat ending type.");
+          const location = (e.parentNode as Element).getAttribute("location");
+          if (
+            (type === "start" && location === "right") ||
+            (type !== "start" && location === "left")
+          )
+            throw new Error(
+              "Repeat endings must start at a measure's left edge and stop at its right edge.",
+            );
+          return {
+            type,
+            passes: passes(e.getAttribute("number") || ""),
+            ...(e.getAttribute("choirstar-return-only") === "yes"
+              ? { returnOnly: true }
+              : {}),
+          };
+        },
+      );
       const repeats = Array.from(measure.getElementsByTagName("repeat"));
+      if (repeats.some((r) => r.getAttribute("after-jump") === "yes"))
+        throw new Error(
+          "Repeats explicitly requested after D.C./D.S. require an unfolded score.",
+        );
       const backward = repeats.find(
         (r) => r.getAttribute("direction") === "backward",
       );
@@ -297,11 +375,22 @@ export function importMusicXml(
         throw new Error("Invalid MusicXML repeat count.");
       return {
         notes,
+        endings,
+        sounds,
         length: extent,
         meter: [...meter],
         key,
         tempos,
-        forward: repeats.some((r) => r.getAttribute("direction") === "forward"),
+        forward: repeats.some(
+          (r) =>
+            r.getAttribute("direction") === "forward" &&
+            (r.parentNode as Element).getAttribute("location") !== "right",
+        ),
+        forwardNext: repeats.some(
+          (r) =>
+            r.getAttribute("direction") === "forward" &&
+            (r.parentNode as Element).getAttribute("location") === "right",
+        ),
         repeat: count,
         short: measure.getAttribute("implicit") === "yes" || index === 0,
       };
@@ -310,6 +399,7 @@ export function importMusicXml(
       name: names.get(part.getAttribute("id")) || `Part ${partIndex + 1}`,
       bars,
       clefs,
+      clefOctaves,
     };
   });
   const count = parsed[0].bars.length;
@@ -326,40 +416,41 @@ export function importMusicXml(
       throw new Error(
         "Independent part meters or key signatures are not supported yet.",
       );
+    if (new Set(others.map((o) => o.repeat).filter((n) => n > 1)).size > 1)
+      throw new Error("Parts disagree about repeat counts.");
     const extent = Math.max(...others.map((o) => o.length));
     const nominal = (ppq * b.meter[0] * 4) / b.meter[1];
     return {
       ...b,
+      // Parts may omit navigation, but must not disagree about explicit counts.
+      endings: [
+        ...new Map(
+          others.flatMap((o) => o.endings).map((e) => [JSON.stringify(e), e]),
+        ).values(),
+      ],
+      sounds: [
+        ...new Map(
+          others.flatMap((o) => o.sounds).map((s) => [JSON.stringify(s), s]),
+        ).values(),
+      ],
       length: b.short && extent > 0 ? extent : Math.max(extent, nominal),
       forward: others.some((o) => o.forward),
+      forwardNext: others.some((o) => o.forwardNext),
       repeat: Math.max(...others.map((o) => o.repeat)),
     };
   });
-  const order: number[] = [];
-  let repeatStart = 0,
-    openRepeat = false;
-  for (let i = 0; i < count; i++) {
-    const b = source[i];
-    if (b.forward) {
-      if (openRepeat)
-        throw new Error(
-          "Nested repeats are not supported yet. Export an unfolded score.",
-        );
-      repeatStart = i;
-      openRepeat = true;
+  source.forEach((b, i) => {
+    if (b.forwardNext) {
+      if (!source[i + 1])
+        throw new Error("Forward repeat follows the final measure.");
+      source[i + 1].forward = true;
     }
-    order.push(i);
-    if (b.repeat > 1) {
-      for (let pass = 1; pass < b.repeat; pass++)
-        for (let j = repeatStart; j <= i; j++) order.push(j);
-      openRepeat = false;
-      repeatStart = i + 1;
-    }
-    if (order.length > 20000)
-      throw new Error("Expanded MusicXML exceeds 20,000 bars.");
-  }
-  if (order.length > count)
-    warnings.add("Repeats are unfolded into sequential practice bars.");
+  });
+  const order = unfold(source);
+  if (order.length !== count || order.some((n, i) => n !== i))
+    warnings.add(
+      "Repeats and navigation are unfolded into sequential practice bars.",
+    );
   const bars: Bar[] = [],
     tempos: Tempo[] = [];
   let end = 0,
@@ -390,6 +481,7 @@ export function importMusicXml(
       const notes: Note[] = [],
         active = new Map<number, Note>();
       order.forEach((sourceIndex, index) => {
+        if (index && sourceIndex !== order[index - 1] + 1) active.clear();
         for (const n of p.bars[sourceIndex].notes.filter(
           (n) => n.voice === voice,
         )) {
@@ -427,6 +519,7 @@ export function importMusicXml(
           ? { lyrics: lyrics.sort((a, b) => a.tick - b.tick) }
           : {}),
         clef: p.clefs.get(voice.split(":")[0]),
+        clefOctaveChange: p.clefOctaves.get(voice.split(":")[0]) || undefined,
       };
     });
   });

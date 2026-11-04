@@ -3,7 +3,7 @@ import { midiToNote } from "./vendor/openvox/core/music/notes";
 import { staffYForEvent } from "./vendor/openvox/core/music/scoreModel";
 import type { Piece, Part } from "./model";
 
-// Keep the upstream renderer intact. Its exported SVG spacing metadata lets
+// The renderer's exported SVG spacing metadata lets
 // overlays follow the engraved rhythm rather than assuming uniform spacing.
 export function notationBar(
   piece: Piece,
@@ -13,6 +13,16 @@ export function notationBar(
 ) {
   const b = piece.bars[index];
   const key = b.key ?? piece.key;
+  const octaveChange = part.clefOctaveChange ?? 0;
+  const displayPitch = (
+    midi: number,
+    spelling?: Part["notes"][number]["spelling"],
+  ) => ({
+    ...(spelling
+      ? { ...spelling, octave: spelling.octave - octaveChange }
+      : midiToNote(midi - octaveChange * 12, key < 0)),
+    midi: midi - octaveChange * 12,
+  });
   const clef =
     part.clef ??
     (part.notes.reduce((sum, n) => sum + n.midi, 0) / part.notes.length < 60
@@ -48,13 +58,14 @@ export function notationBar(
     const duration = (end - start) / piece.ppq;
     const target = (next - start) / piece.ppq;
     const gap = target - duration;
-    // Infer only a short release before an aligned, conventional note value.
+    // MIDI exports may release notes 1/6 beat early, or 1/4 beat for longer
+    // values. Infer these short gaps only before aligned conventional values.
     // Exact written durations and larger gaps retain their rests.
     const conventional = (v: number) =>
       values.some((x) => Math.abs(x - v) < 0.001);
     if (
       gap > 0 &&
-      gap <= Math.min(0.2, target * 0.15) &&
+      gap <= Math.min(0.25, target * 0.2) &&
       conventional(target) &&
       !conventional(duration) &&
       Math.abs(
@@ -68,9 +79,8 @@ export function notationBar(
   const notes = part.notes
     .filter((n) => n.tick < b.end && n.tick + n.length > b.start)
     .map((n) => ({
-      ...(n.spelling ?? midiToNote(n.midi, key < 0)),
+      ...displayPitch(n.midi, n.spelling),
       id: n.id,
-      midi: n.midi,
       start: (Math.max(n.tick, b.start) - b.start) / piece.ppq,
       duration: (displayEnd(n) - Math.max(n.tick, b.start)) / piece.ppq,
       velocity: Math.round(n.velocity * 127),
@@ -108,6 +118,13 @@ export function notationBar(
   );
   // Compact rows can overlap the otherwise empty SVG margins.
   svg = svg.replace('<rect width="100%" height="100%" fill="#fffdf8"/>', "");
+  if (octaveChange) {
+    // Match the renderer's clef centre; the marker stays inside the header crop.
+    svg = svg.replace(
+      "</svg>",
+      `<text data-clef-octave="${octaveChange}" x="76" y="${octaveChange < 0 ? 172 : 80}" text-anchor="middle" font-family="serif" font-size="12" fill="#19161d">8</text></svg>`,
+    );
+  }
   const crop = (x: number, w: number) =>
     svg
       .replace(/viewBox="[^"]+"/, `viewBox="${x} 62 ${w} 130"`)
@@ -138,8 +155,7 @@ export function notationBar(
       );
       const base = target?.midi ?? Math.round(midi);
       const event = {
-        ...(target?.spelling ?? midiToNote(base, key < 0)),
-        midi: base,
+        ...displayPitch(base, target?.spelling),
         id: "trace",
         start: 0,
         duration: 1,

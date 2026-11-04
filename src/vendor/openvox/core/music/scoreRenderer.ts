@@ -1,3 +1,5 @@
+// ChoirStar modification, 2026-11-04: traditional Bravura symbols.
+import { musicSymbol, musicAccidental, musicTimeNumber } from "../../../bravura/symbols";
 import type { MusicalNoteEvent, ScoreDocument } from '../../types';
 import { parseNoteSpelling, resolveNoteSpelling, staffStepForEvent, synchronizeNotePitch } from './notes';
 import {
@@ -157,42 +159,8 @@ function drawRest(
     `<g class="${cls}" data-event-id="${escapeXml(sourceId)}" data-render-id="${escapeXml(eventId)}" data-event-kind="rest" data-voice="${voice}" data-generated="${generated ? 'true' : 'false'}" pointer-events="${generated ? 'none' : 'auto'}">`
   );
 
-  if (measureRest || appearance.baseBeats >= 4) {
-    // Whole / full-measure rest: hangs from the second line from the top.
-    fragments.push(
-      `<rect x="${x - 8}" y="${staffTop + 10 + voiceOffset}" width="16" height="5.5" rx="0.8" fill="#19161d"/>`
-    );
-  } else if (appearance.baseBeats >= 2) {
-    // Half rest: sits on the middle staff line.
-    fragments.push(
-      `<rect x="${x - 8}" y="${staffTop + 14.5 + voiceOffset}" width="16" height="5.5" rx="0.8" fill="#19161d"/>`
-    );
-  } else if (appearance.baseBeats >= 1) {
-    // Quarter rest: a narrow zig-zag body with the characteristic lower hook.
-    // It is drawn from SVG strokes instead of a font glyph, so exports are
-    // consistent across browsers and devices without turning into tofu boxes.
-    const y = staffTop + 20 + voiceOffset;
-    fragments.push(
-      `<path d="M ${x - 3} ${y - 18} L ${x + 4} ${y - 10} L ${x - 1} ${y - 3} L ${x + 5} ${y + 4} L ${x} ${y + 10}" fill="none" stroke="#19161d" stroke-width="3.15" stroke-linecap="round" stroke-linejoin="round"/>`
-    );
-    fragments.push(
-      `<path d="M ${x} ${y + 10} C ${x + 7} ${y + 7}, ${x + 9} ${y + 14}, ${x + 3} ${y + 17} C ${x - 2} ${y + 20}, ${x - 8} ${y + 15}, ${x - 4} ${y + 11}" fill="none" stroke="#19161d" stroke-width="2.7" stroke-linecap="round"/>`
-    );
-  } else {
-    // Eighth through sixty-fourth rest with one to four flags.
-    const y = staffTop + 20 + voiceOffset;
-    const flagCount = appearance.flags;
-    fragments.push(
-      `<path d="M ${x + 2} ${y - 15} L ${x - 4} ${y + 18}" stroke="#19161d" stroke-width="2.2" stroke-linecap="round"/>`
-    );
-    for (let flag = 0; flag < flagCount; flag += 1) {
-      const fy = y - 13 + flag * 8;
-      fragments.push(`<circle cx="${x - 2}" cy="${fy}" r="4.2" fill="#19161d"/>`);
-      fragments.push(
-        `<path d="M ${x + 1} ${fy + 1} C ${x + 10} ${fy + 3}, ${x + 10} ${fy + 10}, ${x + 4} ${fy + 14}" fill="none" stroke="#19161d" stroke-width="2.2" stroke-linecap="round"/>`
-      );
-    }
-  }
+  const rest = measureRest ? 0 : Math.max(0, Math.min(6, Math.round(Math.log2(4 / appearance.baseBeats))));
+  fragments.push(musicSymbol(`rest${rest}` as Parameters<typeof musicSymbol>[0], x, staffTop + (rest === 0 ? 10 : 20) + voiceOffset));
 
   if (appearance.dotted && !measureRest) {
     fragments.push(`<circle cx="${x + 14}" cy="${staffTop + 20 + voiceOffset}" r="2" fill="#19161d"/>`);
@@ -269,29 +237,24 @@ function drawKeySignature(
   const labels = fifths > 0 ? KEY_POSITIONS[clef].sharps : KEY_POSITIONS[clef].flats;
   for (let index = 0; index < count; index += 1) {
     const y = staffYForEvent(fakeNote(labels[index]), staffTop + 20, clef);
-    fragments.push(
-      `<text x="${xStart + index * 14}" y="${y + 6}" text-anchor="middle" font-family="Georgia,'Times New Roman',serif" font-size="25" font-weight="700" fill="#211d25">${sign}</text>`
-    );
+    fragments.push(musicAccidental(sign, xStart + index * 14, y));
   }
   return xStart + count * 14;
 }
 
 function drawTimeSignature(fragments: string[], x: number, staffTop: number, signature: [number, number]): void {
+  // SMuFL time-signature digits are centred on their origin, unlike text
+  // numerals whose y coordinate is a baseline. Centre each row in two spaces.
   fragments.push(
-    `<text x="${x}" y="${staffTop + 18}" text-anchor="middle" font-family="Georgia,'Times New Roman',serif" font-size="20" font-weight="700" fill="#211d25">${signature[0]}</text>`
-  );
-  fragments.push(
-    `<text x="${x}" y="${staffTop + 39}" text-anchor="middle" font-family="Georgia,'Times New Roman',serif" font-size="20" font-weight="700" fill="#211d25">${signature[1]}</text>`
+    musicTimeNumber(signature[0], x, staffTop + 10),
+    musicTimeNumber(signature[1], x, staffTop + 30)
   );
 }
 
 function drawClef(fragments: string[], clef: ConcreteScoreClef, x: number, staffTop: number): void {
-  const glyph = clef === 'treble' ? '𝄞' : '𝄢';
-  const y = clef === 'treble' ? staffTop + 39 : staffTop + 35;
-  const size = clef === 'treble' ? 58 : 52;
-  fragments.push(
-    `<text x="${x}" y="${y}" text-anchor="middle" font-family="'Noto Music','Segoe UI Symbol','Arial Unicode MS',serif" font-size="${size}" fill="#2f2a34">${glyph}</text>`
-  );
+  // Use measured outlines in both styles: system Unicode fonts have different
+  // ink sizes at the same font-size. SMuFL anchors G/F clefs on their staff line.
+  fragments.push(musicSymbol(clef, x, staffTop + (clef === 'treble' ? 30 : 10)));
 }
 
 interface BeamGroup {
@@ -308,6 +271,7 @@ interface StemGeometry {
   stemX: number;
   stemEnd: number;
   stemUp: boolean;
+  flags: number;
 }
 
 interface ChordLayout {
@@ -598,13 +562,9 @@ export function renderScoreSvg(score: ScoreDocument, width = 1200, options: Scor
       if (accidental) {
         const accidentalColumn = chordLayout?.accidentalColumns.get(event.id) || 0;
         const accidentalX = noteX - 25 - accidentalColumn * 13;
-        fragments.push(
-          `<text x="${accidentalX}" y="${y + 7}" text-anchor="middle" font-family="Georgia,'Times New Roman',serif" font-size="24" font-weight="700" fill="#211d25">${accidental}</text>`
-        );
+        fragments.push(musicAccidental(accidental, accidentalX, y));
       }
-      fragments.push(
-        `<ellipse cx="${noteX}" cy="${y}" rx="7.7" ry="5.35" transform="rotate(-18 ${noteX} ${y})" fill="${appearance.open ? '#fffdf8' : '#19161d'}" stroke="#19161d" stroke-width="1.8"/>`
-      );
+      fragments.push(musicSymbol(appearance.baseBeats >= 4 ? "whole" : appearance.open ? "half" : "black", noteX, y, appearance.baseBeats >= 4 ? 18.4 : 12.4));
       const shouldDrawStem = appearance.stem && (!chordLayout || chordLayout.representativeId === event.id);
       if (shouldDrawStem) {
         const representativeId = chordLayout?.representativeId || event.id;
@@ -638,21 +598,14 @@ export function renderScoreSvg(score: ScoreDocument, width = 1200, options: Scor
           y: stemStart,
           stemX,
           stemEnd,
-          stemUp
+          stemUp,
+          flags: appearance.flags
         });
-        const firstIndependentFlag = beamGroup ? beamGroup.beamCount : 0;
-        for (let flag = firstIndependentFlag; flag < appearance.flags; flag += 1) {
-          const offset = (flag - firstIndependentFlag) * (stemUp ? 7 : -7);
-          if (stemUp) {
-            fragments.push(
-              `<path d="M ${stemX} ${stemEnd + offset} C ${stemX + 14} ${stemEnd + 4 + offset}, ${stemX + 13} ${stemEnd + 14 + offset}, ${stemX + 5} ${stemEnd + 20 + offset}" fill="none" stroke="#19161d" stroke-width="2" stroke-linecap="round"/>`
-            );
-          } else {
-            fragments.push(
-              `<path d="M ${stemX} ${stemEnd + offset} C ${stemX - 14} ${stemEnd - 4 + offset}, ${stemX - 13} ${stemEnd - 14 + offset}, ${stemX - 5} ${stemEnd - 20 + offset}" fill="none" stroke="#19161d" stroke-width="2" stroke-linecap="round"/>`
-            );
-          }
+        const independentFlags = beamGroup ? 0 : appearance.flags;
+        if (independentFlags) {
+          fragments.push(musicSymbol(`flag${appearance.flags}${stemUp ? "Up" : "Down"}` as Parameters<typeof musicSymbol>[0], stemX, stemEnd, undefined, "left"));
         }
+
       }
       if (appearance.dotted) {
         const onStaffLine = Math.abs((y - staffTop) / 10 - Math.round((y - staffTop) / 10)) < 0.05;
@@ -706,11 +659,33 @@ export function renderScoreSvg(score: ScoreDocument, width = 1200, options: Scor
           );
         }
       });
-      for (let beam = 0; beam < group.beamCount; beam += 1) {
-        const offset = beam * (group.stemUp ? 7 : -7);
+      const drawBeam = (left: number, right: number, level: number) => {
+        const offset = level * (group.stemUp ? 7 : -7);
         fragments.push(
-          `<line x1="${first.stemX}" y1="${first.stemEnd + offset}" x2="${last.stemX}" y2="${last.stemEnd + offset}" stroke="#19161d" stroke-width="5" stroke-linecap="butt"/>`
+          `<line x1="${left}" y1="${beamYAt(left) + offset}" x2="${right}" y2="${beamYAt(right) + offset}" stroke="#19161d" stroke-width="5" stroke-linecap="butt" data-score-beam="${level + 1}"/>`
         );
+      };
+      for (let beam = 0; beam < group.beamCount; beam += 1) {
+        drawBeam(first.stemX, last.stemX, beam);
+      }
+      // A beamed note never gets a flag. Mixed durations retain their extra
+      // subdivisions as secondary beams, including a short beam for a lone note.
+      const maxFlags = Math.max(...stems.map((stem) => stem.flags));
+      for (let level = group.beamCount; level < maxFlags; level += 1) {
+        let index = 0;
+        while (index < stems.length) {
+          if (stems[index].flags <= level) { index += 1; continue; }
+          const start = index;
+          while (index + 1 < stems.length && stems[index + 1].flags > level) index += 1;
+          const left = stems[start].stemX;
+          if (index > start) drawBeam(left, stems[index].stemX, level);
+          else {
+            const neighbor = stems[start + 1] ?? stems[start - 1];
+            const length = Math.min(12, Math.abs(neighbor.stemX - left) * 0.4);
+            drawBeam(left, left + Math.sign(neighbor.stemX - left) * length, level);
+          }
+          index += 1;
+        }
       }
     }
   }

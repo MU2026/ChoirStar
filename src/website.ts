@@ -20,7 +20,7 @@ export const catalogueSchema = z.object({
         url: webUrl,
         title: z.string().max(1000),
         filename: z.string().max(1000),
-        format: z.enum(["midi", "musicxml"]),
+        format: z.enum(["midi", "musicxml", "nwc"]),
         category: z.array(z.string().max(1000)).max(12),
       }),
     )
@@ -118,7 +118,7 @@ export function scanWebsite(doc: Document, address: string): WebsiteCatalogue {
       } catch {
         /* Keep original. */
       }
-      if (/\.(mid|midi|musicxml|xml)$/i.test(decoded)) {
+      if (/\.(mid|midi|musicxml|xml|nwc|nwctxt)$/i.test(decoded)) {
         filename = decoded.split(/[\\/]/).pop()!;
         break;
       }
@@ -179,7 +179,11 @@ export function scanWebsite(doc: Document, address: string): WebsiteCatalogue {
       url: url.href,
       filename,
       title: rowTitle || clean(node.textContent) || filename,
-      format: /\.(mid|midi)$/i.test(filename) ? "midi" : "musicxml",
+      format: /\.(mid|midi)$/i.test(filename)
+        ? "midi"
+        : /\.(nwc|nwctxt)$/i.test(filename)
+          ? "nwc"
+          : "musicxml",
       category: category.slice(0, 12),
     });
   }
@@ -254,12 +258,12 @@ export function parseWebsiteExport(text: string) {
 
 // This helper runs only when the user invokes their bookmark on the source page.
 export function websiteBookmarklet() {
-  return (
-    "javascript:void((" +
+  const script =
+    "void((" +
     async function (scan: typeof scanWebsite) {
       const catalogue = scan(document, location.href);
       if (!catalogue.entries.length) {
-        alert("No MIDI or uncompressed MusicXML links found on this page.");
+        alert("No MIDI, MusicXML or NWC links found on this page.");
         return;
       }
       if (
@@ -320,15 +324,17 @@ export function websiteBookmarklet() {
       );
       const a = document.createElement("a");
       a.href = url;
-      a.download = "choirstar-website.json";
+      const filename = `choirstar-${location.hostname.replace(/[^a-z0-9.-]/gi, "_")}.json`;
+      a.download = filename;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
       alert(
-        `Exported ${catalogue.entries.length} links and ${Object.keys(files).length} score files. Import choirstar-website.json in ChoirStar. Links without files can be opened for manual download.`,
+        `Exported ${catalogue.entries.length} links and ${Object.keys(files).length} score files. Import ${filename} in ChoirStar. Links without files can be opened for manual download.`,
       );
     }.toString() +
     ")(" +
     scanWebsite.toString() +
-    "))"
-  );
+    "))";
+  // Preserve newlines, comments and URL-sensitive characters in saved bookmarks.
+  return "javascript:" + encodeURIComponent(script);
 }

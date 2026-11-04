@@ -1,3 +1,9 @@
+import {
+  libraryLayout,
+  remapLayoutSource,
+  removePieceAppearance,
+  validateLibraryLayout,
+} from "./piece-library";
 import { catalogueSchema } from "./website";
 import { z } from "zod";
 import { uid, type Library } from "./model";
@@ -33,8 +39,10 @@ const part = z.object({
   name: text,
   notes: z.array(note).max(100000),
   clef: z.enum(["treble", "bass"]).optional(),
+  clefOctaveChange: z.number().int().min(-1).max(1).optional(),
 });
 const settings = z.object({
+  instrument: z.enum(["piano", "choir", "organ", "strings"]).optional(),
   speakers: z.boolean().optional(),
   part: id,
   mix: z.record(
@@ -55,6 +63,23 @@ const settings = z.object({
   timing: z.boolean(),
 });
 const librarySchema = z.object({
+  layout: z
+    .object({
+      items: z
+        .array(
+          z.object({
+            id,
+            parent: id.nullable(),
+            type: z.enum(["folder", "piece"]),
+            title: text,
+            pieceId: id.optional(),
+            sourceKey: z.string().max(30000).optional(),
+          }),
+        )
+        .max(30000),
+      removedSources: z.array(z.string().max(30000)).max(30000),
+    })
+    .optional(),
   websites: z.array(catalogueSchema).max(100).optional(),
   version: z.literal(1),
   profiles: z.array(z.object({ id, name: text })).max(100),
@@ -70,7 +95,7 @@ const librarySchema = z.object({
             category: z.array(text).max(12),
           })
           .optional(),
-        source: z.enum(["midi", "musicxml"]).optional(),
+        source: z.enum(["midi", "musicxml", "nwc"]).optional(),
         importWarnings: z.array(text).optional(),
         ppq: number.positive(),
         end: nonnegative,
@@ -169,6 +194,22 @@ export const getRecording = (id: string) =>
   op<Blob | undefined>("recordings", "readonly", (s) => s.get(id));
 export const deleteRecording = (id: string) =>
   op("recordings", "readwrite", (s) => s.delete(id));
+/** Remove one appearance; collect the shared score only after its last reference. */
+export async function deleteLibraryAppearance(
+  lib: Library,
+  itemId: string,
+): Promise<Library> {
+  const layout = libraryLayout(lib);
+  const item = layout.items.find((n) => n.id === itemId && n.type === "piece");
+  if (!item) return lib;
+  const next = { ...lib, layout: removePieceAppearance(layout, itemId) };
+  if (next.layout.items.some((n) => n.pieceId === item.pieceId)) {
+    await persist(next);
+    return next;
+  }
+  return deletePiece(next, item.pieceId!);
+}
+
 /** Remove a piece and its dependent local data in one transaction. */
 export async function deletePiece(
   lib: Library,
@@ -178,6 +219,14 @@ export async function deletePiece(
   const next: Library = {
     ...lib,
     pieces: lib.pieces.filter((p) => p.id !== pieceId),
+    ...(lib.layout
+      ? {
+          layout: {
+            ...lib.layout,
+            items: lib.layout.items.filter((n) => n.pieceId !== pieceId),
+          },
+        }
+      : {}),
     settings: Object.fromEntries(
       Object.entries(lib.settings).filter(
         ([key]) => key.split(":")[1] !== pieceId,
@@ -269,6 +318,8 @@ export function parseBackup(text: string) {
     })
     .parse(JSON.parse(text));
   const l = parsed.library;
+  if (l.layout)
+    validateLibraryLayout(l.layout, new Set(l.pieces.map((p) => p.id)));
   const identities = [
     ...l.profiles.map((p) => p.id),
     ...l.pieces.flatMap((p) => [
@@ -327,6 +378,20 @@ export async function restore(
     return maps.get(s)!;
   };
   const lib = parsed.library;
+  const restoredLayout = libraryLayout(lib);
+  restoredLayout.items = restoredLayout.items.map((n) => ({
+    ...n,
+    id: remap(n.id),
+    parent: n.parent ? remap(n.parent) : null,
+    ...(n.pieceId ? { pieceId: remap(n.pieceId) } : {}),
+    ...(n.sourceKey
+      ? { sourceKey: remapLayoutSource(n.sourceKey, remap) }
+      : {}),
+  }));
+  restoredLayout.removedSources = restoredLayout.removedSources.map((source) =>
+    remapLayoutSource(source, remap),
+  );
+  const currentLayout = libraryLayout(current);
   lib.profiles.forEach((p) => {
     p.id = remap(p.id);
     p.name += " (restored)";
@@ -379,6 +444,15 @@ export async function restore(
           ]),
         ).values(),
       ),
+      layout: {
+        items: [...currentLayout.items, ...restoredLayout.items],
+        removedSources: [
+          ...new Set([
+            ...currentLayout.removedSources,
+            ...restoredLayout.removedSources,
+          ]),
+        ],
+      },
       profiles: [...current.profiles, ...lib.profiles],
       pieces: [...current.pieces, ...lib.pieces],
       settings: { ...current.settings, ...nextSettings },

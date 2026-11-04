@@ -22,6 +22,20 @@ const note = (
   pitch = "<step>B</step><alter>-1</alter><octave>3</octave>",
 ) =>
   `<note><pitch>${pitch}</pitch><duration>${duration}</duration>${extra}</note>`;
+it("retains octave-clef metadata without transposing MusicXML sounding pitches", () => {
+  const p = parse(
+    score(
+      `<measure>${attr.replace("<line>2</line>", "<line>2</line><clef-octave-change>-1</clef-octave-change>")}${note(12)}</measure>`,
+    ),
+  );
+  expect(p.parts[0].clef).toBe("treble");
+  expect(p.parts[0].clefOctaveChange).toBe(-1);
+  expect(p.parts[0].notes[0].midi).toBe(58);
+  expect(p.parts[0].notes[0].spelling).toEqual({ note: "B♭", octave: 3 });
+  expect(p.importWarnings).not.toContain(
+    "Unusual clefs are displayed using a standard treble or bass clef at sounding pitch.",
+  );
+});
 it("preserves pickups, tempo changes, rests, ties, and spelling", () => {
   const p = parse(
     score(
@@ -73,7 +87,7 @@ it("unfolds repeat counts with unique notes and restores tempo on return", () =>
   expect(new Set(p.parts[0].notes.map((n) => n.id)).size).toBe(7);
   expect(defaults(p).to).toBe(6);
 });
-it("rejects unsupported navigation, bad durations, microtones, and entity declarations", () => {
+it("rejects malformed endings, bad durations, microtones, and entity declarations", () => {
   expect(() =>
     parse(
       score(
@@ -153,4 +167,59 @@ it("preserves melisma markers without empty lyric rows and honors print flags", 
     "continue",
     "stop",
   ]);
+});
+
+it("keeps parts, lyrics, tempos and bar timing aligned through alternate endings", () => {
+  const measures = (navigation: boolean) =>
+    [
+      `<measure>${attr}${navigation ? '<barline location="left"><repeat direction="forward"/></barline>' : ""}<sound tempo="60"/>${note(12, "<lyric><text>A</text></lyric>")}</measure>`,
+      `<measure>${navigation ? '<barline location="left"><ending number="1" type="start"/></barline>' : ""}${note(12, "<lyric><text>B</text></lyric>")}${navigation ? '<barline><ending number="1" type="stop"/><repeat direction="backward"/></barline>' : ""}</measure>`,
+      `<measure>${navigation ? '<barline location="left"><ending number="2" type="start"/></barline>' : ""}<sound tempo="120"/>${note(12, "<lyric><text>C</text></lyric>")}${navigation ? '<barline><ending number="2" type="discontinue"/></barline>' : ""}</measure>`,
+    ].join("");
+  const p = parse(
+    score(measures(true), `<part id="P2">${measures(false)}</part>`),
+  );
+  expect(p.bars).toHaveLength(4);
+  for (const part of p.parts) {
+    expect(part.lyrics?.map((l) => [l.text, l.tick])).toEqual([
+      ["A", 0],
+      ["B", 2880],
+      ["A", 5760],
+      ["C", 8640],
+    ]);
+    expect(part.notes.map((n) => n.tick)).toEqual([0, 2880, 5760, 8640]);
+  }
+  expect(secondsAt(p, p.end)).toBe(10.5);
+});
+it("does not merge a tie across a navigation jump", () => {
+  const p = parse(
+    score(
+      `<measure>${attr}${note(12, '<tie type="stop"/>')}<sound fine="yes"/></measure><measure>${note(12, '<tie type="start"/>')}<sound dacapo="yes"/></measure>`,
+    ),
+  );
+  expect(p.parts[0].notes).toHaveLength(3);
+  expect(p.parts[0].notes.every((n) => n.length === 2880)).toBe(true);
+});
+
+it("starts a right-barline forward repeat at the following measure", () => {
+  const p = parse(
+    score(
+      `<measure>${attr}${note(12)}<barline location="right"><repeat direction="forward"/></barline></measure><measure>${note(12)}<barline><repeat direction="backward"/></barline></measure>`,
+    ),
+  );
+  expect(p.bars).toHaveLength(3);
+});
+it("rejects mid-measure navigation instead of moving the jump", () => {
+  expect(() =>
+    parse(
+      score(
+        `<measure>${attr}${note(4)}<sound dacapo="yes"/>${note(8)}</measure>`,
+      ),
+    ),
+  ).toThrow(/end of a measure/);
+  expect(() =>
+    parse(
+      score(`<measure>${attr}${note(4)}<sound segno="s"/>${note(8)}</measure>`),
+    ),
+  ).toThrow(/start of a measure/);
 });

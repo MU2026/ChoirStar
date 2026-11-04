@@ -26,10 +26,15 @@ class Context {
   });
   createGain = () => node();
   createDynamicsCompressor = () => node();
+  createPeriodicWave = vi.fn((real: Float32Array, imag: Float32Array) => ({
+    real,
+    imag,
+  }));
   createOscillator = () => {
     const o = {
       ...node(),
       type: "",
+      setPeriodicWave: vi.fn(),
       frequency: { value: 0 },
       start: vi.fn(),
       stop: vi.fn(),
@@ -206,3 +211,29 @@ it("requests echo reduction for speakers and blocks microphone feedback even if 
   expect(monitor.gain.setTargetAtTime).toHaveBeenLastCalledWith(0, 10, 0.02);
   await e.close();
 });
+
+it.each(["piano", "choir", "organ", "strings"] as const)(
+  "uses the %s timbre for starting notes and playback while keeping count-in separate",
+  async (instrument) => {
+    const p = demoPiece(),
+      s = { ...defaults(p), instrument },
+      e = new AudioSession();
+    await e.startingNote(p, s);
+    const ctx = e.context as unknown as Context;
+    expect(ctx.oscillators[0].setPeriodicWave).toHaveBeenCalledOnce();
+    const previewHarmonics = ctx.createPeriodicWave.mock.calls[0][1];
+    await e.play(p, s, vi.fn());
+    const countIn = ctx.oscillators.slice(1);
+    expect(countIn.every((o) => o.type === "sine")).toBe(true);
+    ctx.currentTime = e.startTime;
+    vi.advanceTimersByTime(25);
+    expect(ctx.createPeriodicWave.mock.calls.length).toBeGreaterThan(1);
+    expect(ctx.createPeriodicWave.mock.calls[1][1]).toEqual(previewHarmonics);
+    expect(ctx.oscillators.at(-1).frequency.value).toBeGreaterThan(0);
+    e.stopPlayback();
+    expect(ctx.oscillators.every((o) => o.stop.mock.calls.length >= 2)).toBe(
+      true,
+    );
+    await e.close();
+  },
+);

@@ -14,9 +14,13 @@ export function WebsiteLibrary({
   imported,
   onSave,
   onImport,
+  onImported,
+  onBusyChange,
 }: {
   catalogues: WebsiteCatalogue[];
   imported: Set<string>;
+  onImported: (count: number) => void;
+  onBusyChange: (busy: boolean) => void;
   onSave: (catalogue: WebsiteCatalogue) => void;
   onImport: (
     file: File,
@@ -27,6 +31,9 @@ export function WebsiteLibrary({
   const [address, setAddress] = useState(catalogues[0]?.url || "");
   const [active, setActive] = useState("");
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    onBusyChange(busy);
+  }, [busy, onBusyChange]);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
@@ -50,7 +57,7 @@ export function WebsiteLibrary({
     setActive(checked.url);
     setSelected(new Set());
     setQuery("");
-    setStatus(`Found ${checked.entries.length} MIDI / MusicXML links.`);
+    setStatus(`Found ${checked.entries.length} MIDI / MusicXML / NWC links.`);
   }
   async function scan() {
     setBusy(true);
@@ -143,6 +150,7 @@ export function WebsiteLibrary({
       );
     setSelected(new Set());
     setBusy(false);
+    if (count > 0 && !failed.length) onImported(count);
   }
   const visible = (catalogue?.entries || []).filter((e) =>
     `${e.title} ${e.filename} ${e.category.join(" ")}`
@@ -158,8 +166,9 @@ export function WebsiteLibrary({
     <section className="website-library panel" aria-label="Website library">
       <h2>Website library</h2>
       <p className="muted">
-        Browse MIDI (.mid, .midi) and uncompressed MusicXML (.musicxml, .xml)
-        links, grouped as on the source page. Scores stay on this device.
+        Browse MIDI (.mid, .midi), NWC (.nwc, .nwctxt) and uncompressed MusicXML
+        (.musicxml, .xml) links, grouped as on the source page. Scores stay on
+        this device.
       </p>
       <fieldset disabled={busy}>
         <form
@@ -207,17 +216,21 @@ export function WebsiteLibrary({
               <a ref={bookmark} onClick={(e) => e.preventDefault()}>
                 Export to ChoirStar
               </a>{" "}
-              to your bookmarks bar.
+              to your bookmarks bar. Replace any older copy of this bookmark
+              after updating ChoirStar.
             </li>
             <li>
               Open the repertoire page and sign in there. Click the bookmark and
               confirm the local export. Keep the page open while it downloads
-              the scores.
+              the scores. The export is saved to your browser's download folder
+              as choirstar-[website hostname].json. If no confirmation appears,
+              the website may block bookmarklets; use the saved HTML alternative
+              below.
             </li>
             <li>
               Here, choose <strong>Import website file</strong> and select{" "}
-              <strong>choirstar-website.json</strong>. Select scores from the
-              list to add them to your pieces.
+              <strong>choirstar-[website hostname].json</strong>. Select scores
+              from the list to add them to your pieces.
             </li>
           </ol>
           <p>
@@ -308,7 +321,11 @@ export function WebsiteLibrary({
                       <strong>{entry.title}</strong>
                       <small>
                         {entry.filename} ·{" "}
-                        {entry.format === "midi" ? "MIDI" : "MusicXML"}
+                        {entry.format === "midi"
+                          ? "MIDI"
+                          : entry.format === "nwc"
+                            ? "NWC"
+                            : "MusicXML"}
                         {imported.has(entry.url)
                           ? " · Imported"
                           : files[entry.url]
@@ -339,7 +356,7 @@ export function WebsiteLibrary({
           hidden
           ref={localScore}
           type="file"
-          accept=".mid,.midi,.musicxml,.xml"
+          accept=".mid,.midi,.musicxml,.xml,.nwc,.nwctxt"
           onChange={async (e) => {
             const f = e.target.files?.[0];
             e.target.value = "";
@@ -349,6 +366,7 @@ export function WebsiteLibrary({
             try {
               await onImport(f, pending, catalogue);
               setStatus(`Imported ${pending.title}.`);
+              onImported(1);
             } catch (err) {
               setError(
                 err instanceof Error ? err.message : "Could not import score.",

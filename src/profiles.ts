@@ -1,4 +1,4 @@
-import type { Library } from "./model";
+import { uid, type Library } from "./model";
 
 // Remove only unused factory profiles; keep custom singers and all histories.
 export function removeUnusedDefaultSingers(library: Library): Library {
@@ -21,5 +21,14 @@ export function removeUnusedDefaultSingers(library: Library): Library {
         ([key]) => !removed.has(key.split(":")[0]),
       ),
     ),
+  };
+}
+
+// Keep existing ownership intact while practice no longer asks for a singer.
+export function ensurePracticeProfile(library: Library): Library {
+  if (library.profiles.length) return library;
+  return {
+    ...library,
+    profiles: [{ id: uid(), name: "Local practice" }],
   };
 }

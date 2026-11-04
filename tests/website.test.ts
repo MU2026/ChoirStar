@@ -12,6 +12,11 @@ const parse = (html: string) =>
     "text/html",
   ) as unknown as Document;
 const page = "https://choir.example/members/repertoire/";
+// Browsers normalize bookmark URLs before executing their decoded payload.
+const bookmarkletScript = () =>
+  decodeURIComponent(new URL(websiteBookmarklet()).pathname)
+    .replace(/^void\(/, "")
+    .slice(0, -1);
 afterEach(() => vi.unstubAllGlobals());
 it("finds supported links, resolves URLs, keeps heading and list categories, rejects unsafe schemes", () => {
   const result = scanWebsite(
@@ -93,9 +98,7 @@ it("emits a self-contained bookmarklet that scans the page and respects cancella
   const fetcher = vi.fn();
   vi.stubGlobal("confirm", confirm);
   vi.stubGlobal("fetch", fetcher);
-  const script = websiteBookmarklet()
-    .replace(/^javascript:void\(/, "")
-    .slice(0, -1);
+  const script = bookmarkletScript();
   await new Function(`return ${script}`)();
   expect(confirm).toHaveBeenCalledWith(
     expect.stringContaining("1 score links"),
@@ -142,9 +145,7 @@ it("exports a self-contained local bundle and restricts credentials to same-orig
       return "blob:test";
     });
   try {
-    const script = websiteBookmarklet()
-      .replace(/^javascript:void\(/, "")
-      .slice(0, -1);
+    const script = bookmarkletScript();
     await new Function(`return ${script}`)();
     const bundle = parseWebsiteExport(await exported!.text());
     expect(Object.keys(bundle.files)).toHaveLength(2);
@@ -159,7 +160,23 @@ it("exports a self-contained local bundle and restricts credentials to same-orig
       ],
     ]);
     expect(anchor.click).toHaveBeenCalled();
+    expect(anchor.download).toBe("choirstar-choir.example.json");
   } finally {
     createURL.mockRestore();
   }
+});
+
+it("recognizes NWC and NWCTXT links including download names and filename parameters", () => {
+  const catalogue = scanWebsite(
+    parse(
+      '<a href="/one.NWC">One</a><a href="/get?file=two.nwctxt">Two</a><a href="/download" download="three.nwc">Three</a>',
+    ),
+    page,
+  );
+  expect(catalogue.entries.map((e) => e.format)).toEqual(["nwc", "nwc", "nwc"]);
+  expect(
+    parseWebsiteExport(
+      JSON.stringify({ format: "ChoirStar website", catalogue, files: {} }),
+    ).catalogue,
+  ).toEqual(catalogue);
 });

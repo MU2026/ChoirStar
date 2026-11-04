@@ -19,6 +19,7 @@ export interface Lyric {
 export interface Part {
   lyrics?: Lyric[];
   clef?: "treble" | "bass";
+  clefOctaveChange?: number;
   id: string;
   name: string;
   notes: Note[];
@@ -35,7 +36,7 @@ export interface Bar {
 }
 export interface Piece {
   website?: { url: string; page: string; category: string[] };
-  source?: "midi" | "musicxml";
+  source?: "midi" | "musicxml" | "nwc";
   importWarnings?: string[];
   id: string;
   title: string;
@@ -52,6 +53,7 @@ export interface Mix {
   visible: boolean;
 }
 export interface Settings {
+  instrument?: import("./instruments").Instrument;
   speakers?: boolean;
   part: string;
   mix: Record<string, Mix>;
@@ -101,7 +103,20 @@ export interface Profile {
   id: string;
   name: string;
 }
+export interface LibraryItem {
+  id: string;
+  parent: string | null;
+  type: "folder" | "piece";
+  title: string;
+  pieceId?: string;
+  sourceKey?: string;
+}
+export interface LibraryLayout {
+  items: LibraryItem[];
+  removedSources: string[];
+}
 export interface Library {
+  layout?: LibraryLayout;
   websites?: WebsiteCatalogue[];
   version: 1;
   profiles: Profile[];
@@ -266,6 +281,7 @@ export function defaults(p: Piece): Settings {
     mix: Object.fromEntries(
       p.parts.map((t) => [t.id, { volume: 0.65, mute: false, visible: true }]),
     ),
+    instrument: "piano",
     speed: 0.8,
     from: 0,
     to: p.bars.length - 1,

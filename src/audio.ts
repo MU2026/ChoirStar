@@ -1,3 +1,4 @@
+import { instrumentHarmonics, type Instrument } from "./instruments";
 import { secondsAt, type Piece, type Settings, type Sample } from "./model";
 import { PITCH_POLL_MS, pitchWindowSize } from "./pitch-analysis";
 import { PitchStability } from "./pitch-stability";
@@ -44,7 +45,7 @@ export class AudioSession {
       440 * 2 ** ((note.midi - 69) / 12),
       0.12,
       ctx.destination,
-      "triangle",
+      settings.instrument ?? "piano",
     );
   }
   startTime = 0;
@@ -219,7 +220,7 @@ export class AudioSession {
           440 * 2 ** ((n.midi - 69) / 12),
           0.18 * n.velocity,
           this.gains.get(n.part)!,
-          "triangle",
+          settings.instrument ?? "piano",
         );
       }
       if (
@@ -240,18 +241,37 @@ export class AudioSession {
     freq: number,
     volume: number,
     dest: AudioNode,
-    type: OscillatorType,
+    type: OscillatorType | Instrument,
   ) {
     const ctx = this.context!;
     const osc = ctx.createOscillator(),
       gain = ctx.createGain();
-    osc.type = type;
+    if (
+      type === "piano" ||
+      type === "choir" ||
+      type === "organ" ||
+      type === "strings"
+    ) {
+      const harmonics = instrumentHarmonics(type, freq, ctx.sampleRate);
+      osc.setPeriodicWave(
+        ctx.createPeriodicWave(new Float32Array(harmonics.length), harmonics),
+      );
+    } else osc.type = type;
     osc.frequency.value = freq;
     const time = Math.max(ctx.currentTime, start),
       end = Math.max(time + 0.02, start + duration);
+    const attack = type === "strings" ? 0.12 : type === "choir" ? 0.07 : 0.015;
+    const attackEnd = Math.min(time + attack, time + (end - time) / 3);
+    const releaseStart = Math.max(attackEnd, end - 0.035);
     gain.gain.setValueAtTime(0, time);
-    gain.gain.linearRampToValueAtTime(volume, Math.min(time + 0.015, end));
-    gain.gain.setValueAtTime(volume, Math.max(time + 0.015, end - 0.035));
+    gain.gain.linearRampToValueAtTime(volume, attackEnd);
+    if (type === "piano") {
+      // Piano decays while held; the other presets sustain for the written duration.
+      gain.gain.setTargetAtTime(volume * 0.08, attackEnd, 0.65);
+      const level =
+        volume * (0.08 + 0.92 * Math.exp(-(releaseStart - attackEnd) / 0.65));
+      gain.gain.setValueAtTime(level, releaseStart);
+    } else gain.gain.setValueAtTime(volume, releaseStart);
     gain.gain.linearRampToValueAtTime(0, end);
     osc.connect(gain).connect(dest);
     osc.start(time);
