@@ -10,7 +10,16 @@ https://github.com/MU2026/ChoirStar
 The published application's Source code link points to the exact source revision used for its build.
 Local development source is available in the ChoirStar project directory.
 
+Includes an adapted NWC binary reader from music21 10.5.2,
+Copyright (c) 2006-2026 Michael Scott Asato Cuthbert (BSD-3-Clause).
+See licenses/music21-BSD-3-Clause.txt and docs/upstream.md in the source.
+
 Third-party runtime license texts are included in licenses/ alongside this file.
 Imported scores, singer profiles and recordings are processed and stored in your browser, not uploaded by ChoirStar. GitHub hosts the static application and handles ordinary web requests. No repertoire or recordings are bundled.
 
 ChoirStar is an independent derivative project, not an official OpenVox distribution.
+
+Traditional notation includes SVG outlines from Bravura,
+Copyright © 2026 Steinberg Media Technologies GmbH, SIL OFL 1.1.
+https://github.com/steinbergmedia/bravura
+See licenses/Bravura-OFL.txt and docs/upstream.md in the source.
