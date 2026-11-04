@@ -46,3 +46,11 @@ Publish only the contents of `dist/` to the `gh-pages` branch, including an empt
 ## License and provenance
 
 GNU AGPL-3.0-only. See LICENSE, NOTICE, THIRD_PARTY_NOTICES.md and docs/upstream.md. Includes an attributed, pinned OpenVox source snapshot. ChoirStar is an independent derivative, not an official OpenVox distribution. Runtime dependency license texts are in public/licenses/. The application's Source code link identifies its exact build revision.
+
+## Website libraries
+
+Open **Website library** on the home screen. Enter a repertoire page address and choose **Read page**. The catalogue lists MIDI and uncompressed MusicXML files with the page's headings and table groups. Filter the list, select scores and choose **Import selected**. Repeated links in different groups import only once.
+
+For a members-only website, use **Open website / sign in** to authenticate on that website. ChoirStar cannot directly read arbitrary signed-in tabs. Expand **Signed-in or blocked website?** and drag **Export to ChoirStar** to a desktop browser's bookmarks bar. Invoke that bookmark on the repertoire page to download a local catalogue with available score files, then import the resulting JSON in ChoirStar. The helper never exports credentials or uploads scores. Keep the page open until it finishes. Sites may restrict scripts/downloads; in that case save the page as HTML, enter its original URL in ChoirStar, import the HTML, and use **Open file** / **Attach file** for protected scores.
+
+Catalogues remain in local storage and backups; embedded raw score downloads are held only for the current import session. Only imported practice scores are retained. Pages, scores and recordings are not sent to GitHub or a proxy. Direct URL imports require the source site's cross-origin permission. PDF, NWC, audio and compressed MusicXML are not supported, and linked subpages are not crawled. Grouping is inferred from page structure and may not reproduce every site's custom layout.

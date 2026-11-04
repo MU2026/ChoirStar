@@ -998,3 +998,96 @@ audio {
 .target-staff .lyric-label {
   background: #edf5ee;
 }
+
+.website-library {
+  margin-top: 24px;
+}
+.website-library fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.website-library form input {
+  flex: 1;
+  min-width: min(100%, 240px);
+}
+.website-library .row {
+  flex-wrap: wrap;
+}
+.website-library select {
+  max-width: 100%;
+}
+.website-help {
+  margin: 16px 0;
+  font-size: 14px;
+}
+.website-help li {
+  margin-bottom: 8px;
+}
+.website-help a {
+  display: inline-block;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: grab;
+}
+.website-groups {
+  max-height: 65vh;
+  overflow: auto;
+  margin-top: 16px;
+}
+.website-groups > details {
+  border-top: 1px solid var(--line);
+  padding: 8px 0;
+}
+.website-groups summary {
+  font-weight: 600;
+  font-size: 14px;
+}
+.website-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 5px 0;
+  font-size: 13px;
+}
+.website-entry label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.website-entry input {
+  flex-shrink: 0;
+}
+.website-entry strong {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.website-entry small {
+  display: block;
+  opacity: 0.7;
+  overflow-wrap: anywhere;
+}
+.website-entry button {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.website-entry a {
+  flex-shrink: 0;
+}
+.website-error {
+  color: #9c302c;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .website-entry {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .website-entry label {
+    flex-basis: 100%;
+  }
+}

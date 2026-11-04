@@ -1,3 +1,4 @@
+import { catalogueSchema } from "./website";
 import { z } from "zod";
 import { uid, type Library } from "./model";
 const number = z.number().finite();
@@ -54,6 +55,7 @@ const settings = z.object({
   timing: z.boolean(),
 });
 const librarySchema = z.object({
+  websites: z.array(catalogueSchema).max(100).optional(),
   version: z.literal(1),
   profiles: z.array(z.object({ id, name: text })).max(100),
   pieces: z
@@ -61,6 +63,13 @@ const librarySchema = z.object({
       z.object({
         id,
         title: text,
+        website: z
+          .object({
+            url: z.string().max(8000),
+            page: z.string().max(8000),
+            category: z.array(text).max(12),
+          })
+          .optional(),
         source: z.enum(["midi", "musicxml"]).optional(),
         importWarnings: z.array(text).optional(),
         ppq: number.positive(),
@@ -362,6 +371,14 @@ export async function restore(
     }
     const merged: Library = {
       version: 1,
+      websites: Array.from(
+        new Map(
+          [...(lib.websites || []), ...(current.websites || [])].map((c) => [
+            c.url,
+            c,
+          ]),
+        ).values(),
+      ),
       profiles: [...current.profiles, ...lib.profiles],
       pieces: [...current.pieces, ...lib.pieces],
       settings: { ...current.settings, ...nextSettings },

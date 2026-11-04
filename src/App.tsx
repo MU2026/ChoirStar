@@ -1,3 +1,5 @@
+import { WebsiteLibrary } from "./WebsiteLibrary";
+import type { WebsiteCatalogue, WebsiteEntry } from "./website";
 import { removeUnusedDefaultSingers } from "./profiles";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AudioSession, type Frame } from "./audio";
@@ -114,7 +116,8 @@ export default function App() {
     [recordingURL, setRecordingURL] = useState(""),
     [recordingType, setRecordingType] = useState(""),
     [includeAudio, setIncludeAudio] = useState(false),
-    [newProfile, setNewProfile] = useState("");
+    [newProfile, setNewProfile] = useState(""),
+    [showWebsites, setShowWebsites] = useState(false);
   const libRef = useRef(lib);
   libRef.current = lib;
   const engine = useRef(new AudioSession());
@@ -233,6 +236,35 @@ export default function App() {
   }, [running]);
   function message(e: unknown) {
     return e instanceof Error ? e.message : String(e);
+  }
+  async function importWebsiteScore(
+    f: File,
+    entry: WebsiteEntry,
+    catalogue: WebsiteCatalogue,
+  ) {
+    if (libRef.current.pieces.some((p) => p.website?.url === entry.url)) return;
+    if (libRef.current.pieces.length >= 200)
+      throw new Error(
+        "The library limit is 200 pieces. Delete unused pieces before importing more.",
+      );
+    if (f.size > 20 * 1024 * 1024)
+      throw new Error("Score files must be smaller than 20 MB.");
+    if (!/\.(mid|midi|musicxml|xml)$/i.test(f.name))
+      throw new Error("Choose a MIDI or uncompressed MusicXML file.");
+    const p = /\.(musicxml|xml)$/i.test(f.name)
+      ? importMusicXml(await f.text(), f.name)
+      : importMidi(await f.arrayBuffer(), f.name);
+    p.website = {
+      url: entry.url,
+      page: catalogue.url,
+      category: entry.category,
+    };
+    p.title = entry.title;
+    update({ ...libRef.current, pieces: [...libRef.current.pieces, p] });
+    if (!pieceId) {
+      setPieceId(p.id);
+      setTime(0);
+    }
   }
   async function importFile(f: File) {
     try {
@@ -889,6 +921,12 @@ export default function App() {
             </div>
             <div className="row">
               <button onClick={demo}>Try 12-part study</button>
+              <button
+                aria-expanded={showWebsites}
+                onClick={() => setShowWebsites(!showWebsites)}
+              >
+                Website library
+              </button>
               <button className="primary" onClick={() => file.current?.click()}>
                 Import score
               </button>
@@ -1036,6 +1074,34 @@ export default function App() {
               )}
             </section>
           </div>
+          {showWebsites && (
+            <WebsiteLibrary
+              catalogues={lib.websites || []}
+              imported={
+                new Set(
+                  lib.pieces.flatMap((p) => (p.website ? [p.website.url] : [])),
+                )
+              }
+              onImport={importWebsiteScore}
+              onSave={(catalogue) => {
+                const websites = libRef.current.websites || [];
+                if (
+                  !websites.some((c) => c.url === catalogue.url) &&
+                  websites.length >= 100
+                )
+                  throw new Error(
+                    "The library limit is 100 website catalogues.",
+                  );
+                update({
+                  ...libRef.current,
+                  websites: [
+                    ...websites.filter((c) => c.url !== catalogue.url),
+                    catalogue,
+                  ],
+                });
+              }}
+            />
+          )}
           <footer>
             Local-only storage · Clearing site data can erase your library ·{" "}
             <a href={`${import.meta.env.BASE_URL}LICENSE`} target="_blank">

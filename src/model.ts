@@ -1,3 +1,4 @@
+import type { WebsiteCatalogue } from "./website";
 import { Midi } from "@tonejs/midi";
 export interface Note {
   spelling?: { note: string; octave: number };
@@ -33,6 +34,7 @@ export interface Bar {
   meter: [number, number];
 }
 export interface Piece {
+  website?: { url: string; page: string; category: string[] };
   source?: "midi" | "musicxml";
   importWarnings?: string[];
   id: string;
@@ -100,6 +102,7 @@ export interface Profile {
   name: string;
 }
 export interface Library {
+  websites?: WebsiteCatalogue[];
   version: 1;
   profiles: Profile[];
   pieces: Piece[];

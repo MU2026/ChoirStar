@@ -162,3 +162,43 @@ it("rolls back the library when recording deletion fails", async () => {
   expect(await load()).toEqual(l);
   expect((await getRecording("r"))?.size).toBe(5);
 });
+
+it("preserves website catalogues and score provenance through backup restoration", async () => {
+  const lib = fixture();
+  lib.websites = [
+    {
+      url: "https://choir.example/repertoire/",
+      title: "Season",
+      entries: [
+        {
+          url: "https://choir.example/one.mid",
+          title: "One",
+          filename: "one.mid",
+          format: "midi",
+          category: ["Winter"],
+        },
+      ],
+    },
+  ];
+  lib.pieces[0].website = {
+    url: lib.websites[0].entries[0].url,
+    page: lib.websites[0].url,
+    category: ["Winter"],
+  };
+  const encoded = JSON.stringify({
+    format: "ChoirStar backup",
+    library: lib,
+    recordings: {},
+  });
+  expect(parseBackup(encoded).library.websites).toEqual(lib.websites);
+  const restored = await restore(encoded, {
+    version: 1,
+    profiles: [],
+    pieces: [],
+    settings: {},
+    attempts: [],
+  });
+  expect(restored.websites).toEqual(lib.websites);
+  expect(restored.pieces[0].website).toEqual(lib.pieces[0].website);
+  expect((await load())?.websites).toEqual(lib.websites);
+});
