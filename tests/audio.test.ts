@@ -104,6 +104,51 @@ it("stops scheduled voices and timers before starting a new passage", async () =
   expect(end).not.toHaveBeenCalled();
   await e.close();
 });
+it("plays each part's first pitch for one second, highest first, before the count-in", async () => {
+  const p = demoPiece(),
+    s = defaults(p),
+    e = new AudioSession();
+  // Deliberately scramble staff order and mute every part: preparation still
+  // includes every voice and sorts by sounding pitch.
+  p.parts.reverse();
+  Object.values(s.mix).forEach((mix) => {
+    mix.mute = true;
+  });
+  await e.play(p, s, vi.fn());
+  const ctx = e.context as unknown as Context;
+  const preparation = ctx.oscillators.filter((o) => o.type !== "sine");
+  expect(preparation).toHaveLength(p.parts.length);
+  const pitches = p.parts.map((p) => p.notes[0].midi).sort((a, b) => b - a);
+  preparation.forEach((o, i) => {
+    expect(o.frequency.value).toBeCloseTo(440 * 2 ** ((pitches[i] - 69) / 12));
+    expect(o.start.mock.calls[0][0]).toBeCloseTo(10.15 + i);
+    expect(o.stop.mock.calls[0][0] - o.start.mock.calls[0][0]).toBeCloseTo(
+      1.01,
+    );
+  });
+  const clicks = ctx.oscillators.filter((o) => o.type === "sine");
+  expect(clicks).toHaveLength(p.bars[0].meter[0]);
+  expect(clicks[0].start.mock.calls[0][0]).toBeCloseTo(10.15 + p.parts.length);
+  expect(e.startTime).toBeGreaterThan(clicks.at(-1).start.mock.calls[0][0]);
+  await e.close();
+});
+it("omits preparation and count-in from both the first and subsequent passage loops", async () => {
+  const p = demoPiece(),
+    s = { ...defaults(p), from: 1, to: 1, loop: true },
+    e = new AudioSession();
+  for (let cycle = 0; cycle < 2; cycle++) {
+    await e.play(p, s, vi.fn());
+    const ctx = e.context as unknown as Context;
+    expect(e.startTime).toBeCloseTo(ctx.currentTime + 0.15);
+    expect(ctx.oscillators.every((o) => o.type !== "sine")).toBe(true);
+    const before = ctx.oscillators.length;
+    await e.previewNote(99);
+    expect(ctx.oscillators).toHaveLength(before);
+    expect(e.running).toBe(true);
+    e.stopPlayback();
+  }
+  await e.close();
+});
 it("releases the microphone when an unavailable input channel is selected", async () => {
   const stop = vi.fn();
   const stream = {
@@ -122,21 +167,18 @@ it("releases the microphone when an unavailable input channel is selected", asyn
   await e.close();
 });
 
-it("plays the selected passage's first sounding note without opening a microphone", async () => {
+it("previews a clicked sounding note without opening a microphone", async () => {
   const p = demoPiece(),
     s = defaults(p),
     e = new AudioSession();
   s.part = p.parts[11].id;
   s.from = 2;
   s.to = 3;
-  await e.startingNote(p, s);
-  const note = p.parts[11].notes.find(
-    (n) => n.tick + n.length > p.bars[2].start,
-  )!;
+  await e.previewNote(50, s.instrument);
   const ctx = e.context as unknown as Context;
   expect(ctx.oscillators).toHaveLength(1);
   expect(ctx.oscillators[0].frequency.value).toBeCloseTo(
-    440 * 2 ** ((note.midi - 69) / 12),
+    440 * 2 ** ((50 - 69) / 12),
   );
   expect(e.stream).toBeNull();
   expect(e.running).toBe(false);
@@ -218,12 +260,12 @@ it.each(["piano", "choir", "organ", "strings"] as const)(
     const p = demoPiece(),
       s = { ...defaults(p), instrument },
       e = new AudioSession();
-    await e.startingNote(p, s);
+    await e.previewNote(p.parts[0].notes[0].midi, instrument);
     const ctx = e.context as unknown as Context;
     expect(ctx.oscillators[0].setPeriodicWave).toHaveBeenCalledOnce();
     const previewHarmonics = ctx.createPeriodicWave.mock.calls[0][1];
     await e.play(p, s, vi.fn());
-    const countIn = ctx.oscillators.slice(1);
+    const countIn = ctx.oscillators.slice(1).filter((o) => o.type === "sine");
     expect(countIn.every((o) => o.type === "sine")).toBe(true);
     ctx.currentTime = e.startTime;
     vi.advanceTimersByTime(25);

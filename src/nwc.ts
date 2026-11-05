@@ -143,6 +143,7 @@ export function nwcToMusicXml(commands: NwcCommand[], filename: string) {
     const ties = new Set<string>();
     const verses = new Map<string, { text: string; syllabic: string }[]>();
     let lyricIndex = 0;
+    let inSlur = false;
     const DIV = 960;
     const attrs = (value: string) => {
       pending += `<attributes>${value}</attributes>`;
@@ -177,6 +178,32 @@ export function nwcToMusicXml(commands: NwcCommand[], filename: string) {
       const f = command.fields,
         type = command.name;
       if (/^Lyric\d+$/.test(type)) {
+        if (command.lyricSyllables) {
+          // Binary NWC keeps explicit note slots and puts syllable-joining
+          // hyphens before the following syllable. Do not tokenize as prose:
+          // even a whitespace-only slot consumes a note in this verse.
+          const slots = command.lyricSyllables.map((slot) => slot.trim());
+          verses.set(
+            type.slice(5),
+            slots.map((slot, index) => {
+              const text = slot.replace(/^-/, "").replace(/_/g, " ");
+              const continues = slot.startsWith("-");
+              const nextContinues =
+                !!text && !!slots[index + 1]?.startsWith("-");
+              return {
+                text,
+                syllabic: continues
+                  ? nextContinues
+                    ? "middle"
+                    : "end"
+                  : nextContinues
+                    ? "begin"
+                    : "single",
+              };
+            }),
+          );
+          continue;
+        }
         const tokens =
           (f.Text || "").replace(/\r?\n/g, " ").match(/[^\s-]+-?/g) || [];
         let continuing = false;
@@ -352,6 +379,14 @@ export function nwcToMusicXml(commands: NwcCommand[], filename: string) {
         if (!positions.length || positions.length > 64)
           throw new Error("Invalid NWC chord size.");
         let continuingTie = false;
+        const alwaysLyric = (f.Opts || "").includes("Lyric=Always");
+        const neverLyric = (f.Opts || "").includes("Lyric=Never");
+        const slurContinuation = command.slur
+          ? command.slur === "continue" || command.slur === "stop"
+          : inSlur;
+        const slurOut = command.slur
+          ? command.slur === "start" || command.slur === "continue"
+          : dur.includes("Slur");
         for (const [index, position] of positions.entries()) {
           if (type === "Rest") {
             pending += `<note><rest/><duration>${length}</duration></note>`;
@@ -392,22 +427,29 @@ export function nwcToMusicXml(commands: NwcCommand[], filename: string) {
           pending += `<note>${index ? "<chord/>" : ""}<pitch><step>${step}</step><alter>${alter}</alter><octave>${octave}</octave></pitch><duration>${length}</duration>${stop ? '<tie type="stop"/>' : ""}${match[3] ? '<tie type="start"/>' : ""}`;
           const lyricAllowed =
             !index &&
-            (!stop || (f.Opts || "").includes("Lyric=Always")) &&
-            !(f.Opts || "").includes("Lyric=Never");
+            (!stop || alwaysLyric) &&
+            (!slurContinuation || alwaysLyric) &&
+            !neverLyric;
           if (lyricAllowed)
             for (const [verse, tokens] of verses) {
               const token = tokens[lyricIndex];
               if (token?.text)
-                pending += `<lyric number="${xml(verse)}"><syllabic>${token.syllabic}</syllabic><text>${xml(token.text)}</text></lyric>`;
+                pending += `<lyric number="${xml(verse)}"><syllabic>${token.syllabic}</syllabic><text>${xml(token.text)}</text>${slurOut ? '<extend type="start"/>' : ""}</lyric>`;
             }
+          if (!index && slurContinuation && !lyricAllowed)
+            for (const [verse, tokens] of verses)
+              if (tokens[lyricIndex - 1]?.text)
+                pending += `<lyric number="${xml(verse)}"><extend type="${slurOut ? "continue" : "stop"}"/></lyric>`;
           pending += "</note>";
         }
         if (
           type !== "Rest" &&
-          (!continuingTie || (f.Opts || "").includes("Lyric=Always")) &&
-          !(f.Opts || "").includes("Lyric=Never")
+          (!continuingTie || alwaysLyric) &&
+          (!slurContinuation || alwaysLyric) &&
+          !neverLyric
         )
           lyricIndex++;
+        inSlur = type !== "Rest" && slurOut;
         used += length;
       } else if (type === "TempoVariance")
         warnings.add(

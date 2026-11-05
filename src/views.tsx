@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, useMemo, memo } from "react";
 import { lyricLayout } from "./lyrics";
 import { notationBar } from "./notation";
 import { noteLabel } from "./vendor/openvox/core/music/notes";
+import { GRADE_COLORS } from "./note-feedback";
 import {
   secondsAt,
   tickAt,
@@ -9,6 +10,8 @@ import {
   type Piece,
   type Settings,
   type Sample,
+  type NoteResult,
+  type Note,
 } from "./model";
 function useWidth() {
   const ref = useRef<HTMLDivElement>(null);
@@ -23,8 +26,71 @@ function useWidth() {
   }, []);
   return { ref, width };
 }
-const EngravedBar = memo(function EngravedBar({ svg }: { svg: string }) {
-  return <div dangerouslySetInnerHTML={{ __html: svg }} />;
+const noResults: NoteResult[] = [];
+const EngravedBar = memo(function EngravedBar({
+  svg,
+  notes,
+  results,
+  disabled,
+  onNote,
+}: {
+  svg: string;
+  notes: Note[];
+  results: NoteResult[];
+  disabled: boolean;
+  onNote: (midi: number) => void;
+}) {
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    // Expose individual note buttons instead of flattening the SVG into an image.
+    root.current?.querySelector("svg")?.setAttribute("role", "group");
+    const byId = new Map(notes.map((n) => [n.id, n]));
+    const grades = new Map(results.map((r) => [r.note, r]));
+    root.current
+      ?.querySelectorAll<SVGGElement>('[data-event-kind="note"]')
+      .forEach((group) => {
+        const note = byId.get(group.dataset.eventId!);
+        if (!note) return;
+        const result = grades.get(note.id);
+        group.style.setProperty(
+          "--note-color",
+          result?.grade ? GRADE_COLORS[result.grade] : "#19161d",
+        );
+        group.dataset.graded = String(!!result?.grade);
+        group.setAttribute("role", "button");
+        group.setAttribute("tabindex", disabled ? "-1" : "0");
+        group.setAttribute("aria-disabled", String(disabled));
+        const description = `${noteLabel(note.midi)}${result ? ` · ${result.grade ?? "Not assessed"} · ${result.detail ?? ""}` : ""}`;
+        group.setAttribute("aria-label", `Play ${description}`);
+        group.querySelector("title")?.remove();
+        const title = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "title",
+        );
+        title.textContent = description;
+        group.prepend(title);
+      });
+  }, [svg, notes, results, disabled]);
+  const play = (target: EventTarget | null) => {
+    if (disabled || !(target instanceof Element)) return;
+    const id = target.closest<SVGGElement>('[data-event-kind="note"]')?.dataset
+      .eventId;
+    const note = notes.find((n) => n.id === id);
+    if (note) onNote(note.midi);
+  };
+  return (
+    <div
+      ref={root}
+      onClick={(e) => play(e.target)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          play(e.target);
+        }
+      }}
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
 });
 function VolumeKnob({
   name,
@@ -101,6 +167,7 @@ function VolumeKnob({
 }
 export function Score({
   piece,
+  zoom,
   settings,
   time,
   samples,
@@ -109,10 +176,13 @@ export function Score({
   onMix,
   onPart,
   controlsDisabled,
-  onStartingNote,
+  onNote,
+  results,
+  feedbackPart,
   onRange,
 }: {
   piece: Piece;
+  zoom: number;
   settings: Settings;
   time: number;
   samples: Sample[];
@@ -121,7 +191,9 @@ export function Score({
   onMix: (id: string, patch: Partial<Settings["mix"][string]>) => void;
   onPart: (part: string) => void;
   controlsDisabled: boolean;
-  onStartingNote: (part: string) => void;
+  onNote: (midi: number) => void;
+  results: NoteResult[];
+  feedbackPart: string;
   onRange: (range: { from: number; to: number } | null) => void;
 }) {
   const partChoice = (part: Piece["parts"][number]) => (
@@ -153,7 +225,9 @@ export function Score({
         ) *
           14,
     ) + 88;
-  const cellWidth = Math.max(120, (width - labelWidth) / 4);
+  // Keep the 100% bar width as the zoom baseline, so larger notes also
+  // receive more horizontal space instead of being squeezed into four bars.
+  const cellWidth = Math.max(120, (width * zoom - labelWidth) / 4);
   const selected =
     settings.from > 0 || settings.to < piece.bars.length - 1 || settings.loop;
   const [draft, setDraft] = useState<{ from: number; to: number } | null>(null);
@@ -172,13 +246,14 @@ export function Score({
   const rangeFrame = useRef(0);
   const barUnderPointer = (x: number) => {
     const el = ref.current!;
+    const bounds = el.getBoundingClientRect();
+    const scale = bounds.width / el.offsetWidth || 1;
     return Math.max(
       0,
       Math.min(
         piece.bars.length - 1,
         Math.floor(
-          (x - el.getBoundingClientRect().left + el.scrollLeft - labelWidth) /
-            cellWidth,
+          ((x - bounds.left) / scale + el.scrollLeft - labelWidth) / cellWidth,
         ),
       ),
     );
@@ -213,7 +288,8 @@ export function Score({
   const tick = Math.max(0, tickAt(piece, Math.max(0, time)));
   const bar = barAt(piece, Math.min(tick, piece.end - 1));
   const first = Math.max(0, scrollBar - 1);
-  const last = Math.min(piece.bars.length, first + 7);
+  const visibleBars = Math.ceil(Math.max(0, width - labelWidth) / cellWidth);
+  const last = Math.min(piece.bars.length, first + visibleBars + 3);
   const parts = piece.parts;
   const lyricLayouts = useMemo(
     () => new Map(piece.parts.map((p) => [p.id, lyricLayout(p)])),
@@ -245,6 +321,22 @@ export function Score({
   );
   const animationCells = useRef(cells);
   animationCells.current = cells;
+  useLayoutEffect(() => {
+    const viewport = ref.current;
+    const target = viewport?.querySelector<HTMLElement>(".target-group");
+    if (!viewport || !target) return;
+    const update = () => {
+      // At large zoom levels, allow the whole target row to scroll when it
+      // cannot fit above the footer; pinning it would hide the pitch pane.
+      target.style.position =
+        target.offsetHeight + 36 > viewport.clientHeight ? "relative" : "";
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(viewport);
+    observer.observe(target);
+    update();
+    return () => observer.disconnect();
+  }, [piece, settings.part]);
   useLayoutEffect(() => {
     const viewport = ref.current;
     if (!viewport) return;
@@ -293,6 +385,7 @@ export function Score({
   return (
     <div
       className="score-scroll"
+      style={{ zoom }}
       ref={ref}
       aria-label="Scrollable score"
       onScroll={(e) =>
@@ -343,10 +436,11 @@ export function Score({
                 el = ref.current;
               if (!d || !el) return;
               const r = el.getBoundingClientRect();
+              const scale = r.width / el.offsetWidth || 1;
               const shift =
                 d.x > r.right - 30
                   ? 8
-                  : d.x < r.left + labelWidth + 20
+                  : d.x < r.left + labelWidth * scale + 20
                     ? -8
                     : 0;
               if (shift) {
@@ -479,30 +573,6 @@ export function Score({
                     </button>
                     <div className="staff-mix-controls">
                       <button
-                        className="staff-mute start-note"
-                        disabled={controlsDisabled}
-                        aria-label={`Starting note for ${part.name}`}
-                        title={`Starting note for ${part.name}`}
-                        onClick={() => onStartingNote(part.id)}
-                      >
-                        <svg
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          aria-hidden="true"
-                        >
-                          <ellipse
-                            cx="8"
-                            cy="18"
-                            rx="4"
-                            ry="3"
-                            fill="currentColor"
-                          />
-                          <path d="M12 18V3c0 5 9 3 6 10" />
-                        </svg>
-                      </button>
-                      <button
                         className="staff-mute"
                         aria-label={`Mute ${part.name}`}
                         title={`Mute ${part.name}`}
@@ -591,7 +661,13 @@ export function Score({
                         width: cellWidth,
                       }}
                     >
-                      <EngravedBar svg={cell.svg} />
+                      <EngravedBar
+                        svg={cell.svg}
+                        notes={part.notes}
+                        results={part.id === feedbackPart ? results : noResults}
+                        disabled={controlsDisabled}
+                        onNote={onNote}
+                      />
                       {lyrics.verses.length > 0 && (
                         <svg
                           className="staff-lyrics"

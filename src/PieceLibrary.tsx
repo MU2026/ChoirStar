@@ -13,12 +13,16 @@ export function PieceLibrary({
   onChange,
   onSelect,
   onDelete,
+  onReload,
+  reloading,
 }: {
   pieces: Piece[];
   layout: LibraryLayout;
   onChange: (layout: LibraryLayout) => void;
   onSelect: (id: string) => void;
   onDelete: (itemId: string) => void;
+  onReload: (pieceId: string) => void;
+  reloading: boolean;
 }) {
   const piecesById = new Map(pieces.map((piece) => [piece.id, piece]));
   const [dragging, setDragging] = useState<string | null>(null);
@@ -126,6 +130,25 @@ export function PieceLibrary({
   function actions(item: LibraryItem) {
     return (
       <span className="library-actions">
+        {item.type === "piece" && (
+          <button
+            type="button"
+            className="library-action"
+            aria-label={`Reload ${item.title}`}
+            title={
+              piecesById.get(item.pieceId!)?.website
+                ? "Reload from source website"
+                : "Reload from original score file"
+            }
+            disabled={reloading}
+            onClick={(e) => {
+              e.preventDefault();
+              onReload(item.pieceId!);
+            }}
+          >
+            ↻
+          </button>
+        )}
         <button
           type="button"
           className="library-action"

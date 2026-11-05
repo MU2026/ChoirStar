@@ -26,6 +26,10 @@ Adaptation: `src/nwc-binary.ts` ports the needed binary field reading to TypeScr
 
 The earlier zz85/nwc-viewer and mzealey/nwc2xml sources were investigated only. No code from those GPL-v2 converter implementations was imported into ChoirStar because their applicable license terms did not establish a compatible grant for the current combined application.
 
+Local modification, 2026-11-05: `src/nwc-binary.ts` retains each binary lyric slot, including whitespace-only entries, in the neutral command. The MusicXML adapter preserves these skipped notes and converts leading binary syllable-joining hyphens to MusicXML syllabic markers. No additional upstream code or dependency was imported.
+
+Further local correction, 2026-11-05: retain slur state and lyric-assignment flags from binary note fields, including chord members. The adapter extends slurred syllables instead of advancing their token index and honors explicit Always/Never overrides. Binary flag interpretation was checked against the private input bytes and its existing MusicXML export; no converter implementation was copied and no new dependency was added.
+
 ## Traditional notation symbols, 2026-11-04
 
 Bravura OpenType font from [Steinberg's Bravura repository](https://github.com/steinbergmedia/bravura), pinned commit `37b194378b710cc40e406ab6c4b07608bb9548ae`, original file `redist/otf/Bravura.otf`. Copyright © 2026 Steinberg Media Technologies GmbH; SIL Open Font License 1.1, Reserved Font Name "Bravura". Full notice: `public/licenses/Bravura-OFL.txt`.

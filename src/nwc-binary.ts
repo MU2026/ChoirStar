@@ -3,9 +3,14 @@
 // see vendor/music21/LICENSE. Modified for ChoirStar, 2026-11-04:
 // TypeScript port, bounded reads, explicit version/feature errors, lyrics and
 // transposition retained, and neutral commands rather than music21 objects.
+// 2026-11-05: preserve binary lyric slots, including blank verse entries.
+// 2026-11-05: preserve slur states and explicit lyric assignment flags.
 export interface NwcCommand {
   name: string;
   fields: Record<string, string>;
+  // Binary lyrics store one slot per sung note, including whitespace-only skips.
+  lyricSyllables?: string[];
+  slur?: "start" | "continue" | "stop";
 }
 export const nwcDecode = (bytes: Uint8Array): string => {
   try {
@@ -207,12 +212,14 @@ export function readNwcBinary(bytes: Uint8Array): NwcCommand[] {
       let dots: number,
         grace = false,
         tie = false,
+        slur: NwcCommand["slur"],
         pos = "",
         attr = 0;
       if (type === 8) {
         dots = r.u8();
         const extra = r.u8();
         grace = !!(extra & 32);
+        slur = ([undefined, "start", "stop", "continue"] as const)[extra & 3];
         tie = !!(dots & 16);
         const pitch = -r.i8();
         attr = r.u8();
@@ -226,8 +233,13 @@ export function readNwcBinary(bytes: Uint8Array): NwcCommand[] {
         dots = data[3];
         r.skip(2);
       }
+      const lyricMode =
+        type === 8 ? ((data[1] + (data[2] << 8)) & 0x180) >> 7 : 0;
+      if (lyricMode === 3)
+        throw new Error("Unsupported NWC lyric syllable option.");
       return {
         name: type === 8 ? "Note" : "Rest",
+        ...(slur ? { slur } : {}),
         fields: {
           Dur:
             durations[duration] +
@@ -235,6 +247,9 @@ export function readNwcBinary(bytes: Uint8Array): NwcCommand[] {
             (data[1] & 12 ? ",Triplet" : "") +
             (grace ? ",Grace" : ""),
           Pos: pos,
+          ...(lyricMode
+            ? { Opts: `Lyric=${lyricMode === 1 ? "Always" : "Never"}` }
+            : {}),
         },
       };
     }
@@ -260,9 +275,11 @@ export function readNwcBinary(bytes: Uint8Array): NwcCommand[] {
         );
       return {
         name: "Chord",
+        ...(notes[0].slur ? { slur: notes[0].slur } : {}),
         fields: {
           Dur: notes[0].fields.Dur,
           Pos: notes.map((n) => n.fields.Pos).join(","),
+          ...(notes[0].fields.Opts ? { Opts: notes[0].fields.Opts } : {}),
         },
       };
     }
@@ -342,7 +359,11 @@ export function readNwcBinary(bytes: Uint8Array): NwcCommand[] {
         if (r.pos > end || end > bytes.length)
           throw new Error("Invalid NWC lyric block.");
         r.pos = end;
-        emit(`Lyric${verse + 1}`, { Text: syllables.join(" ") });
+        commands.push({
+          name: `Lyric${verse + 1}`,
+          fields: { Text: syllables.join(" ") },
+          lyricSyllables: syllables,
+        });
       }
     }
     if (verses) r.u16();

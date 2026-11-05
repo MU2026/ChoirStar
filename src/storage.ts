@@ -139,6 +139,11 @@ const librarySchema = z.object({
             cents: nonnegative.nullable(),
             onset: number.nullable(),
             samples: nonnegative.int(),
+            grade: z
+              .enum(["Perfect", "Great", "OK", "Poor", "Missed"])
+              .nullable()
+              .optional(),
+            detail: text.optional(),
           }),
         ),
         recording: id.optional(),

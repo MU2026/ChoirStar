@@ -67,11 +67,14 @@ export interface Settings {
   timing: boolean;
 }
 export interface Sample {
+  rms?: number;
   time: number;
   midi: number | null;
   confidence: number;
 }
 export interface NoteResult {
+  grade?: "Perfect" | "Great" | "OK" | "Poor" | "Missed" | null;
+  detail?: string;
   note: string;
   bar: number;
   cents: number | null;
@@ -326,17 +329,20 @@ export function assess(
   from: number,
   to: number,
   timing: boolean,
+  speed = 1,
+  only?: ReadonlySet<string>,
 ): NoteResult[] {
   return part.notes
     .filter(
       (n) => n.tick >= piece.bars[from].start && n.tick < piece.bars[to].end,
     )
-    .map((n, i, notes) => {
+    .flatMap((n, i, notes) => {
+      if (only && !only.has(n.id)) return [];
       const start = secondsAt(piece, n.tick),
         end = secondsAt(piece, n.tick + n.length);
       const frames = samples.filter(
         (s) =>
-          s.time >= start + 0.06 &&
+          s.time >= start + Math.min(0.06 * speed, (end - start) / 4) &&
           s.time < end &&
           s.midi !== null &&
           s.confidence >= 0.85,
@@ -348,10 +354,9 @@ export function assess(
       const repeated =
         prev &&
         prev.midi === n.midi &&
-        secondsAt(piece, prev.tick + prev.length) > start - 0.15;
+        secondsAt(piece, prev.tick + prev.length) > start - 0.15 * speed;
       const next = notes[i + 1];
       const onsetEnd = Math.min(
-        start + 0.45,
         end,
         next ? secondsAt(piece, next.tick) : Infinity,
       );
@@ -359,23 +364,25 @@ export function assess(
         !repeated && timing
           ? samples.find(
               (s) =>
-                s.time >= start - 0.35 &&
+                s.time >= start - 0.35 * speed &&
                 s.time < onsetEnd &&
                 s.midi !== null &&
                 Math.abs(s.midi - n.midi) < 0.6 &&
                 s.confidence >= 0.85,
             )
           : undefined;
-      return {
-        note: n.id,
-        bar: barAt(piece, n.tick),
-        cents:
-          deviations.length >= 3
-            ? deviations[Math.floor(deviations.length / 2)]
-            : null,
-        onset: onsetFrame ? (onsetFrame.time - start) * 1000 : null,
-        samples: frames.length,
-      };
+      return [
+        {
+          note: n.id,
+          bar: barAt(piece, n.tick),
+          cents:
+            deviations.length >= 3
+              ? deviations[Math.floor(deviations.length / 2)]
+              : null,
+          onset: onsetFrame ? ((onsetFrame.time - start) * 1000) / speed : null,
+          samples: frames.length,
+        },
+      ];
     });
 }
 export function suggestions(results: NoteResult[]) {

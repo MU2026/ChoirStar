@@ -14,7 +14,7 @@ it("rejects isolated octave spikes but accepts a sustained real leap", () => {
   expect(filter.filter(frame(60, 0.165), true).midi).toBeNull();
   expect(filter.filter(frame(48, 0.22), true).midi).toBe(48);
   expect(filter.filter(frame(60, 0.275), true).midi).toBeNull();
-  expect(filter.filter(frame(60, 0.33), true).midi).toBe(60);
+  expect(filter.filter(frame(60, 0.33), true).midi).toBeNull();
   expect(filter.filter(frame(60, 0.385), true).midi).toBe(60);
 });
 it("preserves vibrato and off-target pitches without correcting them", () => {
@@ -35,9 +35,30 @@ it("leaves weak, unstable and low-confidence samples unassessed", () => {
   ];
   expect(inputs.every((f) => filter.filter(f, true).midi === null)).toBe(true);
 });
-it("leaves headphone capture unchanged", () => {
+it("accepts the initial confident headphone pitch without an extra startup delay", () => {
   const f = frame(48, 0);
   expect(new PitchStability().filter(f, false)).toBe(f);
+});
+it.each([false, true])(
+  "rejects short downward octave glitches with speakers=%s",
+  (speakers) => {
+    const filter = new PitchStability();
+    filter.filter(frame(60, 0), speakers);
+    filter.filter(frame(60, 0.02), speakers);
+    expect(filter.filter(frame(48, 0.04), speakers).midi).toBeNull();
+    expect(filter.filter(frame(48, 0.06), speakers).midi).toBeNull();
+    expect(filter.filter(frame(60.1, 0.08), speakers).midi).toBe(60.1);
+    expect(filter.filter(frame(48, 0.1), speakers).midi).toBeNull();
+    expect(filter.filter(frame(48, 0.12), speakers).midi).toBeNull();
+    expect(filter.filter(frame(48, 0.14), speakers).midi).toBe(48);
+  },
+);
+it("rejects uncertain headphone input rather than filling it with a held or target pitch", () => {
+  const filter = new PitchStability();
+  filter.filter(frame(52, 0), false);
+  expect(filter.filter(frame(52, 0.02, 0.6), false).midi).toBeNull();
+  expect(filter.filter(frame(null, 0.04), false).midi).toBeNull();
+  expect(filter.filter(frame(52.3, 0.06), false).midi).toBe(52.3);
 });
 
 it("recovers immediately after a brief uncertain consonant without retaining stale pitch during silence", () => {
@@ -56,4 +77,12 @@ it("does not confirm a new pitch using a stale candidate after a capture gap", (
   expect(filter.filter(frame(48, 0), true).midi).toBeNull();
   expect(filter.filter(frame(48, 1), true).midi).toBeNull();
   expect(filter.filter(frame(48, 1.02), true).midi).toBe(48);
+});
+it("does not join sparse octave candidates into a confirmed leap", () => {
+  const filter = new PitchStability();
+  filter.filter(frame(60, 0), false);
+  expect(filter.filter(frame(48, 0.02), false).midi).toBeNull();
+  expect(filter.filter(frame(48, 0.16), false).midi).toBeNull();
+  expect(filter.filter(frame(48, 0.18), false).midi).toBeNull();
+  expect(filter.filter(frame(48, 0.2), false).midi).toBe(48);
 });

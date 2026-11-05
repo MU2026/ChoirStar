@@ -212,6 +212,7 @@ function binaryStudy(
   count = 1,
   extra: number[][] = [],
   clef?: number,
+  lyricVerses: string[][] = [],
 ) {
   const u16 = (n: number) => Buffer.from([n & 255, (n >> 8) & 255]);
   const str = (s = "") => Buffer.from(s + "\0");
@@ -259,7 +260,17 @@ function binaryStudy(
         ? [zero(27), Buffer.from([5]), u16(0), u16(12), zero(5)]
         : [zero(22), Buffer.from([12]), zero(6)]),
       u16(0),
-      u16(0),
+      u16(lyricVerses.length),
+      ...(lyricVerses.length
+        ? [
+            zero(4),
+            ...lyricVerses.map((slots) => {
+              const data = Buffer.concat([u16(0), ...slots.map(str), str()]);
+              return Buffer.concat([u16(data.length), u16(0), data]);
+            }),
+            u16(0),
+          ]
+        : []),
       u16(0),
       u16(3 + extra.length + (clef === undefined ? 0 : 1)),
       ...(clef === undefined
@@ -275,6 +286,44 @@ function binaryStudy(
     buffer.byteOffset + buffer.length,
   ) as ArrayBuffer;
 }
+it("preserves blank binary lyric slots so later verses start in the third bar", async () => {
+  const note = [8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5];
+  const bar = [2, 0, 0, 0, 0];
+  for (const version of [0x14b, 0x200, 0x201]) {
+    const data = binaryStudy(
+      version,
+      1,
+      [bar, note, bar, note, bar, note],
+      undefined,
+      [
+        ["Hum", " hum", " Win", "-ter"],
+        [" ", "  ", "\rSing", "-ing"],
+        [" ", "  ", " Soft", "-ly"],
+      ],
+    );
+    const commands = readNwcBinary(new Uint8Array(data));
+    expect(commands.find((c) => c.name === "Lyric2")?.lyricSyllables).toEqual([
+      " ",
+      "  ",
+      "\rSing",
+      "-ing",
+    ]);
+    const piece = await importNwc(data, "verse-study.nwc", parse);
+    const lyrics = piece.parts[0].lyrics!;
+    for (const verse of ["2", "3"]) {
+      const events = lyrics.filter((lyric) => lyric.verse === verse);
+      expect(events).toHaveLength(2);
+      expect(events.map((lyric) => lyric.tick)).toEqual([
+        piece.bars[2].start,
+        piece.bars[3].start,
+      ]);
+      expect(events.map((lyric) => lyric.syllabic)).toEqual(["begin", "end"]);
+    }
+    expect(lyrics.filter((l) => l.verse === "1").map((l) => l.tick)).toEqual(
+      piece.bars.map((bar) => bar.start),
+    );
+  }
+});
 it("preserves binary NWC bass clefs for every supported binary version", async () => {
   for (const version of [0x14b, 0x200, 0x201]) {
     const piece = await importNwc(
@@ -465,4 +514,86 @@ it("decodes binary ending bitmasks and flow styles without losing byte alignment
       ],
     );
   }
+});
+
+it("keeps a slurred syllable across a bar and repeats the following lyric at the correct note", async () => {
+  const note = (slur = 0) => [8, 0, 0, 0, 0, 0, 0, 0, slur, 0, 5];
+  const bar = [2, 0, 0, 0, 0];
+  for (const version of [0x14b, 0x200, 0x201]) {
+    const data = binaryStudy(
+      version,
+      1,
+      [
+        bar,
+        [2, 0, 0, 6, 0],
+        note(1),
+        bar,
+        note(2),
+        bar,
+        note(),
+        [2, 0, 0, 7, 2],
+      ],
+      undefined,
+      [["Intro", " Sing", " Next"]],
+    );
+    const p = await importNwc(data, "slur-study.nwc", parse);
+    const lyrics = p.parts[0].lyrics!;
+    expect(p.bars).toHaveLength(7);
+    expect(lyrics.filter((l) => l.text).map((l) => [l.text, l.tick])).toEqual([
+      ["Intro", p.bars[0].start],
+      ["Sing", p.bars[1].start],
+      ["Next", p.bars[3].start],
+      ["Sing", p.bars[4].start],
+      ["Next", p.bars[6].start],
+    ]);
+    expect(lyrics.find((l) => l.tick === p.bars[1].start)?.extend).toBe(
+      "start",
+    );
+    expect(lyrics.find((l) => l.tick === p.bars[2].start)).toMatchObject({
+      text: "",
+      extend: "stop",
+    });
+  }
+});
+it("honors explicit binary lyric Always/Never overrides", async () => {
+  const never = [8, 0, 0, 0, 0, 0, 1, 0, 0, 0, 5];
+  const alwaysEnd = [8, 0, 0, 0, 0, 128, 0, 0, 2, 0, 5];
+  const normal = [8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5];
+  for (const version of [0x14b, 0x200, 0x201]) {
+    const data = binaryStudy(
+      version,
+      1,
+      [never, alwaysEnd, normal],
+      undefined,
+      [["First", " Second", " Third"]],
+    );
+    const commands = readNwcBinary(new Uint8Array(data)).filter(
+      (c) => c.name === "Note",
+    );
+    expect(commands[1].fields.Opts).toBe("Lyric=Never");
+    expect(commands[2].fields.Opts).toBe("Lyric=Always");
+    const p = await importNwc(data, "overrides.nwc", parse);
+    expect(p.parts[0].lyrics!.filter((l) => l.text).map((l) => l.tick)).toEqual(
+      [0, 7680, 11520],
+    );
+  }
+});
+it("uses NWCTXT slur continuation without consuming another lyric token", async () => {
+  const p = await importNwc(
+    bytes(
+      score(
+        staff(
+          '|Lyric1|Text:"Sing next"\n|Note|Dur:Whole,Slur|Pos:0\n|Bar\n|Note|Dur:Whole|Pos:1\n|Bar\n|Note|Dur:Whole|Pos:2',
+        ),
+      ),
+    ),
+    "text-slur.nwctxt",
+    parse,
+  );
+  expect(
+    p.parts[0].lyrics!.filter((l) => l.text).map((l) => [l.text, l.tick]),
+  ).toEqual([
+    ["Sing", 0],
+    ["next", 7680],
+  ]);
 });

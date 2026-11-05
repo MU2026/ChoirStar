@@ -28,24 +28,18 @@ export class AudioSession {
       0.02,
     );
   }
-  async startingNote(piece: Piece, settings: Settings) {
+  async previewNote(midi: number, instrument: Instrument = "piano") {
     if (this.running) return;
-    const start = piece.bars[settings.from].start;
-    const end = piece.bars[settings.to].end;
-    const note = piece.parts
-      .find((p) => p.id === settings.part)
-      ?.notes.find((n) => n.tick + n.length > start && n.tick < end);
-    if (!note)
-      throw new Error("This part has no notes in the selected passage.");
     const ctx = await this.ready();
+    if (this.running) return;
     this.stopPlayback();
     this.tone(
       ctx.currentTime,
-      1.5,
-      440 * 2 ** ((note.midi - 69) / 12),
+      1,
+      440 * 2 ** ((midi - 69) / 12),
       0.12,
       ctx.destination,
-      settings.instrument ?? "piano",
+      instrument,
     );
   }
   startTime = 0;
@@ -171,7 +165,20 @@ export class AudioSession {
         .reverse()
         .find((t) => t.tick <= piece.bars[settings.from].start)?.bpm || 120;
     const beat = ((60 / bpm) * 4) / meter[1] / settings.speed;
-    this.startTime = ctx.currentTime + 0.15 + beat * meter[0];
+    const preparation = settings.loop
+      ? []
+      : piece.parts
+          .flatMap((part) => {
+            const note = part.notes.find(
+              (n) =>
+                n.tick + n.length > piece.bars[settings.from].start &&
+                n.tick < piece.bars[settings.to].end,
+            );
+            return note ? [note] : [];
+          })
+          .sort((a, b) => b.midi - a.midi);
+    const countStart = ctx.currentTime + 0.15 + preparation.length;
+    this.startTime = countStart + (settings.loop ? 0 : beat * meter[0]);
     const master = ctx.createGain();
     master.gain.value = 0.7 / Math.sqrt(piece.parts.length);
     const compressor = ctx.createDynamicsCompressor();
@@ -185,9 +192,19 @@ export class AudioSession {
       gain.connect(master);
       this.gains.set(p.id, gain);
     }
-    for (let i = 0; i < meter[0]; i++)
+    preparation.forEach((note, i) =>
       this.tone(
-        ctx.currentTime + 0.15 + i * beat,
+        ctx.currentTime + 0.15 + i,
+        1,
+        440 * 2 ** ((note.midi - 69) / 12),
+        0.12,
+        ctx.destination,
+        settings.instrument ?? "piano",
+      ),
+    );
+    for (let i = 0; !settings.loop && i < meter[0]; i++)
+      this.tone(
+        countStart + i * beat,
         0.07,
         i === 0 ? 880 : 660,
         0.09,

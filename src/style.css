@@ -283,6 +283,14 @@ footer a {
   background: #fffdf8;
   overscroll-behavior: contain;
 }
+.view-zoom {
+  gap: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.view-zoom select {
+  padding: 6px;
+}
 .score-strip {
   position: relative;
   min-height: 100%;
@@ -387,6 +395,44 @@ footer a {
 }
 .feedback meter {
   width: 85px;
+}
+.score-event[data-event-kind="note"][aria-disabled="false"] {
+  cursor: pointer;
+  pointer-events: bounding-box;
+}
+.score-event[data-event-kind="note"]:focus-visible {
+  outline: 2px solid var(--gold);
+}
+.score-event[data-graded="true"] [fill]:not([fill="none"]) {
+  fill: var(--note-color);
+}
+.score-event[data-graded="true"] [stroke]:not([stroke="none"]) {
+  stroke: var(--note-color);
+}
+.note-rating {
+  font-weight: 700;
+}
+.grade-help {
+  position: relative;
+  font-size: 12px;
+}
+.grade-help summary {
+  cursor: pointer;
+}
+.grade-help > div {
+  position: absolute;
+  right: 0;
+  bottom: 28px;
+  width: min(420px, 85vw);
+  padding: 12px;
+  background: #fffefa;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  box-shadow: 0 6px 24px #24363522;
+  z-index: 12;
+}
+.grade-help p {
+  margin: 4px 0;
 }
 .transport {
   flex: none;
