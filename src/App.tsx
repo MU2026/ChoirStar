@@ -969,6 +969,27 @@ export default function App() {
       </small>
     </>
   );
+  const fullScreenItem = (
+    <MenuItem
+      onClick={() => {
+        closeSettings();
+        if (document.fullscreenElement)
+          void document
+            .exitFullscreen()
+            .catch(() => setError("Could not exit full screen."));
+        else
+          void root.current
+            ?.requestFullscreen()
+            .catch(() =>
+              setError(
+                "Full screen is unavailable. Maximize your browser window instead.",
+              ),
+            );
+      }}
+    >
+      Full screen
+    </MenuItem>
+  );
   const audioPanel = piece && settings && (
     <div role="menu" aria-label="Practice settings" onKeyDown={navigateMenu}>
       <MenuBranch label="Playback">
@@ -1156,25 +1177,7 @@ export default function App() {
         </MenuBranch>
       </MenuBranch>
       <MenuBranch label="View">
-        <MenuItem
-          onClick={() => {
-            closeSettings();
-            if (document.fullscreenElement)
-              void document
-                .exitFullscreen()
-                .catch(() => setError("Could not exit full screen."));
-            else
-              void root.current
-                ?.requestFullscreen()
-                .catch(() =>
-                  setError(
-                    "Full screen is unavailable. Maximize your browser window instead.",
-                  ),
-                );
-          }}
-        >
-          Full screen
-        </MenuItem>
+        {fullScreenItem}
         <MenuBranch label="Zoom">
           <label className="menu-slider">
             Zoom <output>{Math.round(scoreZoom * 100)}%</output>
@@ -1275,15 +1278,18 @@ export default function App() {
     <div role="menu" aria-label="Library menu" onKeyDown={navigateMenu}>
       <MenuBranch label="Import">{importItems}</MenuBranch>
       <MenuBranch label="Backup">{backupItems}</MenuBranch>
-      <MenuItem
-        disabled={!loaded}
-        onClick={() => {
-          closeSettings();
-          setScreen("library");
-        }}
-      >
-        View practice history
-      </MenuItem>
+      <MenuBranch label="View">
+        {fullScreenItem}
+        <MenuItem
+          disabled={!loaded}
+          onClick={() => {
+            closeSettings();
+            setScreen("library");
+          }}
+        >
+          View practice history
+        </MenuItem>
+      </MenuBranch>
     </div>
   );
   const menuButton = (
