@@ -110,6 +110,7 @@ const EngravedBar = memo(function EngravedBar({
   );
 });
 function PartControls({
+  detectionEnabled,
   open,
   part,
   mix,
@@ -118,6 +119,7 @@ function PartControls({
   onPart,
   onMix,
 }: {
+  detectionEnabled: boolean;
   open: boolean;
   part: Piece["parts"][number];
   mix: Settings["mix"][string];
@@ -143,16 +145,18 @@ function PartControls({
           role="group"
           aria-label={`${part.name} controls`}
         >
-          <button
-            className="part-icon"
-            aria-label={`Practise ${part.name}`}
-            title={`Practise ${part.name}`}
-            aria-pressed={selected}
-            disabled={disabled}
-            onClick={onPart}
-          >
-            <TransportIcon kind="sing" />
-          </button>
+          {detectionEnabled && (
+            <button
+              className="part-icon"
+              aria-label={`Practise ${part.name}`}
+              title={`Practise ${part.name}`}
+              aria-pressed={selected}
+              disabled={disabled}
+              onClick={onPart}
+            >
+              <TransportIcon kind="sing" />
+            </button>
+          )}
           <button
             className="part-icon"
             aria-label={`Boost ${part.name}`}
@@ -221,6 +225,7 @@ function PartControls({
   );
 }
 export function Score({
+  detectionEnabled,
   piece,
   zoom,
   settings,
@@ -241,6 +246,7 @@ export function Score({
   onMetronome,
   onInitialPitches,
 }: {
+  detectionEnabled: boolean;
   piece: Piece;
   zoom: number;
   settings: Settings;
@@ -264,6 +270,7 @@ export function Score({
   const [mixerOpen, setMixerOpen] = useState(false);
   const partControls = (part: Piece["parts"][number]) => (
     <PartControls
+      detectionEnabled={detectionEnabled}
       open={mixerOpen}
       part={part}
       mix={settings.mix[part.id]}
@@ -290,7 +297,7 @@ export function Score({
           14,
     ) +
     4 +
-    (mixerOpen ? 220 : 0);
+    (mixerOpen ? (detectionEnabled ? 220 : 192) : 0);
   // Keep the 100% bar width as the zoom baseline, so larger notes also
   // receive more horizontal space instead of being squeezed into four bars.
   const cellWidth = Math.max(120, (width * zoom - labelWidth) / 4);
@@ -410,7 +417,7 @@ export function Score({
     observer.observe(target);
     update();
     return () => observer.disconnect();
-  }, [piece, settings.part]);
+  }, [piece, settings.part, detectionEnabled]);
   useLayoutEffect(() => {
     const viewport = ref.current;
     if (!viewport) return;
@@ -728,7 +735,7 @@ export function Score({
             key={part.id}
             data-part={part.id}
             className={
-              part.id === settings.part
+              detectionEnabled && part.id === settings.part
                 ? "part-group target-group"
                 : "part-group"
             }
@@ -736,7 +743,10 @@ export function Score({
             {settings.mix[part.id]?.visible !== false ? (
               <div
                 className={
-                  "staff " + (part.id === settings.part ? "target-staff" : "")
+                  "staff " +
+                  (detectionEnabled && part.id === settings.part
+                    ? "target-staff"
+                    : "")
                 }
                 key={part.id}
                 style={{ height: lyrics.height }}
@@ -778,7 +788,7 @@ export function Score({
                   let path = "";
                   let pen = false;
                   let previous = -Infinity;
-                  if (part.id === settings.part)
+                  if (detectionEnabled && part.id === settings.part)
                     for (const sample of samples) {
                       const t = tickAt(piece, sample.time),
                         b = piece.bars[cell.index];
@@ -804,7 +814,11 @@ export function Score({
                       <EngravedBar
                         svg={cell.svg}
                         notes={part.notes}
-                        results={part.id === feedbackPart ? results : noResults}
+                        results={
+                          detectionEnabled && part.id === feedbackPart
+                            ? results
+                            : noResults
+                        }
                         disabled={controlsDisabled}
                         onNote={onNote}
                       />
@@ -912,22 +926,24 @@ export function Score({
                           )}
                         </svg>
                       )}
-                      <svg
-                        className="notation-overlay"
-                        viewBox={`0 0 ${cellWidth} 130`}
-                        aria-label={
-                          part.id === settings.part
-                            ? "Sung pitch on notation"
-                            : undefined
-                        }
-                      >
-                        <path
-                          d={path}
-                          fill="none"
-                          stroke="var(--accent)"
-                          strokeWidth="2.5"
-                        />
-                      </svg>
+                      {detectionEnabled && (
+                        <svg
+                          className="notation-overlay"
+                          viewBox={`0 0 ${cellWidth} 130`}
+                          aria-label={
+                            detectionEnabled && part.id === settings.part
+                              ? "Sung pitch on notation"
+                              : undefined
+                          }
+                        >
+                          <path
+                            d={path}
+                            fill="none"
+                            stroke="var(--accent)"
+                            strokeWidth="2.5"
+                          />
+                        </svg>
+                      )}
                     </div>
                   );
                 })}
@@ -986,7 +1002,7 @@ export function Score({
                 </div>
               </div>
             )}
-            {part.id === settings.part && (
+            {detectionEnabled && part.id === settings.part && (
               <PitchView
                 piece={piece}
                 settings={settings}

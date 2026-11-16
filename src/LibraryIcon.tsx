@@ -23,7 +23,7 @@ export function LibraryIcon({
       ) : (
         <>
           <path d="M4 16v4h16v-4M12 4v12" />
-          <path d={kind === "import" ? "m7 9 5-5 5 5" : "m7 11 5 5 5-5"} />
+          <path d={kind === "import" ? "m7 11 5 5 5-5" : "m7 9 5-5 5 5"} />
         </>
       )}
     </svg>

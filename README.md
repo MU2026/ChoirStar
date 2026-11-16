@@ -6,6 +6,9 @@ Try it at https://mu2026.github.io/ChoirStar/ . This is an early prototype, desi
 
 ## Practice
 
+Singing detection is off by default. Enable **Enable singing detection** in the hamburger menu to show singing controls, recording, pitch feedback and practice history. Listening and score practice remain available with detection off. The library **View** menu includes **Full screen** and **Zoom** (50%–200%, with a 100% reset); library zoom is separate from practice score zoom. Import uses a down arrow and Backup uses an up arrow beside **Library**.
+
+
 Use the small **Import** up-arrow beside **Library** and choose **Local file** or **Web address** (also available in the hamburger menu) to add scores, then select a piece to open practice. Staff names collapse their notation; the pitch view collapses separately. Open **Mixer** to select **My part** with the microphone icon and adjust each staff's Boost, Solo, Mute and volume controls. A singing round requires an explicitly selected part and available microphone.
 
 Click empty score space, rests or lyrics to place the cursor; clicking these during playback resumes from that position. A stopped note click or Enter/Space previews its sounding pitch without moving the cursor or scrolling the score. Drag the bar ruler to choose a repeating passage and use Escape to clear it. The Mixer includes Starting pitches, Metronome and tempo controls. Starting pitches are enabled by default and play before ordinary starts and loop iterations; ordinary starts also include a count-in. Tempo can change during playback without changing pitch.

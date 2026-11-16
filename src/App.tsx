@@ -74,6 +74,7 @@ export default function App() {
     [deleting, setDeleting] = useState(false),
     [running, setRunning] = useState(false),
     [starting, setStarting] = useState(false),
+    [detectionEnabled, setDetectionEnabled] = useState(false),
     [record, setRecord] = useState(false),
     [monitor, setMonitor] = useState(false),
     [monitorVolume, setMonitorVolume] = useState(0.35),
@@ -90,6 +91,7 @@ export default function App() {
     [showWebsites, setShowWebsites] = useState(false);
   const [noteResults, setNoteResults] = useState<NoteResult[]>([]);
   const [scoreZoom, setScoreZoom] = useState(1);
+  const [libraryZoom, setLibraryZoom] = useState(1);
   const [reloading, setReloading] = useState(false);
   const [reloadFallback, setReloadFallback] = useState<{
     id: string;
@@ -258,9 +260,7 @@ export default function App() {
       );
       if (engine.current.running) {
         void stop();
-        setError(
-          "Audio devices changed. Practice stopped; re-check timing compensation.",
-        );
+        setError("Audio devices changed. Playback stopped.");
       }
       const l = libRef.current;
       update({
@@ -514,7 +514,13 @@ export default function App() {
     practice: boolean,
     loopConfig?: typeof startConfig.current,
   ) {
-    if (starting || finishing.current || !profile) return;
+    if (
+      starting ||
+      finishing.current ||
+      !profile ||
+      (practice && !detectionEnabled)
+    )
+      return;
     const p = loopConfig?.p || piece,
       s = loopConfig?.s || settings;
     if (!p || !s) return;
@@ -990,8 +996,47 @@ export default function App() {
       Full screen
     </MenuItem>
   );
+  const viewZoom = screen === "practice" ? scoreZoom : libraryZoom;
+  const setViewZoom = screen === "practice" ? setScoreZoom : setLibraryZoom;
+  const zoomMenu = (
+    <MenuBranch label="Zoom">
+      <label className="menu-slider">
+        Zoom <output>{Math.round(viewZoom * 100)}%</output>
+        <input
+          aria-label="View zoom"
+          type="range"
+          min="50"
+          max="200"
+          step="5"
+          value={viewZoom * 100}
+          onChange={(e) => setViewZoom(Number(e.target.value) / 100)}
+        />
+      </label>
+      <MenuItem onClick={() => setViewZoom(1)}>Reset to 100%</MenuItem>
+    </MenuBranch>
+  );
+  const detectionItem = (
+    <MenuItem
+      checked={detectionEnabled}
+      disabled={disabled}
+      onClick={() => {
+        setDetectionEnabled(!detectionEnabled);
+        if (detectionEnabled && screen === "library") setScreen("prepare");
+        setRecord(false);
+        setMonitor(false);
+        clearFeedback();
+        setSamples([]);
+        setFrame(null);
+        setInputError("");
+        closeSettings();
+      }}
+    >
+      Enable singing detection
+    </MenuItem>
+  );
   const audioPanel = piece && settings && (
     <div role="menu" aria-label="Practice settings" onKeyDown={navigateMenu}>
+      {detectionItem}
       <MenuBranch label="Playback">
         <MenuBranch label="Instrument">
           {INSTRUMENTS.map((instrument) => (
@@ -1009,190 +1054,184 @@ export default function App() {
             </MenuItem>
           ))}
         </MenuBranch>
-        <MenuItem
-          checked={!!settings.speakers}
-          disabled={disabled}
-          title="Enable when using speakers. Keep playback quiet."
-          onClick={() => {
-            setMonitor(false);
-            change({
-              speakers: !settings.speakers,
-              channel: !settings.speakers ? 0 : settings.channel,
-              timing: false,
-            });
-            closeSettings();
-          }}
-        >
-          Echo reduction <span className="menu-hint">for speakers</span>
-        </MenuItem>
-        <MenuBranch label="Hear my voice">
-          <MenuItem
-            checked={!monitor || !!settings.speakers}
-            disabled={!!settings.speakers}
-            onClick={() => setMonitor(!monitor)}
-          >
-            Mute
-          </MenuItem>
-          <label className="menu-slider">
-            Voice level <output>{Math.round(monitorVolume * 100)}%</output>
-            <input
-              aria-label="Voice monitoring volume"
-              type="range"
-              min="0"
-              max="100"
-              disabled={!!settings.speakers}
-              value={monitorVolume * 100}
-              onChange={(e) => setMonitorVolume(Number(e.target.value) / 100)}
-            />
-          </label>
-          <p className="menu-note">
-            {settings.speakers
-              ? "Off with echo reduction."
-              : "Headphones only · may add delay"}
-          </p>
-        </MenuBranch>
-      </MenuBranch>
-      <MenuBranch label="Recording">
-        <MenuBranch label="Device">
-          <MenuItem
-            radio
-            checked={!settings.device || settings.device === "off"}
-            disabled={disabled || inputBusy}
-            onClick={() => {
-              change({ device: "off", timing: false });
-              closeSettings();
-            }}
-          >
-            Off
-          </MenuItem>
-          {devices.map((d, i) => (
+        {detectionEnabled && (
+          <>
             <MenuItem
-              key={d.deviceId}
-              radio
-              checked={settings.device === d.deviceId}
-              disabled={disabled || inputBusy}
+              checked={!!settings.speakers}
+              disabled={disabled}
+              title="Enable when using speakers. Keep playback quiet."
               onClick={() => {
-                change({ device: d.deviceId, timing: false });
+                setMonitor(false);
+                change({
+                  speakers: !settings.speakers,
+                  channel: !settings.speakers ? 0 : settings.channel,
+                  timing: false,
+                });
                 closeSettings();
               }}
             >
-              {d.label || `Microphone ${i + 1}`}
+              Echo reduction <span className="menu-hint">for speakers</span>
             </MenuItem>
-          ))}
-          {settings.device &&
-            settings.device !== "off" &&
-            !devices.some((d) => d.deviceId === settings.device) && (
-              <MenuItem checked disabled onClick={() => {}}>
-                Selected microphone unavailable
+            <MenuBranch label="Hear my voice">
+              <MenuItem
+                checked={!monitor || !!settings.speakers}
+                disabled={!!settings.speakers}
+                onClick={() => setMonitor(!monitor)}
+              >
+                Mute
               </MenuItem>
-            )}
-          <div role="separator" className="menu-separator" />
-          <MenuItem
-            disabled={disabled || inputBusy}
-            onClick={() => void inputAccess()}
-          >
-            {inputBusy
-              ? "Checking microphones…"
-              : "Allow access / refresh devices…"}
-          </MenuItem>
-          {inputError && (
-            <p role="alert" className="menu-note">
-              {inputError}
-            </p>
-          )}
-        </MenuBranch>
-        <MenuItem
-          checked={record}
-          disabled={disabled}
-          title="Save the voice recording locally with this round."
-          onClick={() => {
-            setRecord(!record);
-            closeSettings();
-          }}
-        >
-          Save a recording
-        </MenuItem>
-        <div role="separator" className="menu-separator" />
-        <MenuBranch label="Input and timing">
-          <MenuBranch label="Input channel">
-            {["Input 1 / mono", "Input 2 (audio interface)"].map(
-              (label, channel) => (
-                <MenuItem
-                  key={channel}
-                  radio
-                  checked={settings.channel === channel}
-                  disabled={disabled || !!settings.speakers}
-                  onClick={() => {
-                    change({ channel, timing: false });
-                    closeSettings();
-                  }}
-                >
-                  {label}
+              <label className="menu-slider">
+                Voice level <output>{Math.round(monitorVolume * 100)}%</output>
+                <input
+                  aria-label="Voice monitoring volume"
+                  type="range"
+                  min="0"
+                  max="100"
+                  disabled={!!settings.speakers}
+                  value={monitorVolume * 100}
+                  onChange={(e) =>
+                    setMonitorVolume(Number(e.target.value) / 100)
+                  }
+                />
+              </label>
+              <p className="menu-note">
+                {settings.speakers
+                  ? "Off with echo reduction."
+                  : "Headphones only · may add delay"}
+              </p>
+            </MenuBranch>
+          </>
+        )}
+      </MenuBranch>
+      {detectionEnabled && (
+        <MenuBranch label="Recording">
+          <MenuBranch label="Device">
+            <MenuItem
+              radio
+              checked={!settings.device || settings.device === "off"}
+              disabled={disabled || inputBusy}
+              onClick={() => {
+                change({ device: "off", timing: false });
+                closeSettings();
+              }}
+            >
+              Off
+            </MenuItem>
+            {devices.map((d, i) => (
+              <MenuItem
+                key={d.deviceId}
+                radio
+                checked={settings.device === d.deviceId}
+                disabled={disabled || inputBusy}
+                onClick={() => {
+                  change({ device: d.deviceId, timing: false });
+                  closeSettings();
+                }}
+              >
+                {d.label || `Microphone ${i + 1}`}
+              </MenuItem>
+            ))}
+            {settings.device &&
+              settings.device !== "off" &&
+              !devices.some((d) => d.deviceId === settings.device) && (
+                <MenuItem checked disabled onClick={() => {}}>
+                  Selected microphone unavailable
                 </MenuItem>
-              ),
+              )}
+            <div role="separator" className="menu-separator" />
+            <MenuItem
+              disabled={disabled || inputBusy}
+              onClick={() => void inputAccess()}
+            >
+              {inputBusy
+                ? "Checking microphones…"
+                : "Allow access / refresh devices…"}
+            </MenuItem>
+            {inputError && (
+              <p role="alert" className="menu-note">
+                {inputError}
+              </p>
             )}
           </MenuBranch>
           <MenuItem
+            checked={record}
             disabled={disabled}
+            title="Save the voice recording locally with this round."
             onClick={() => {
+              setRecord(!record);
               closeSettings();
-              engine.current.stopPlayback();
-              engine.current.releaseMic();
-              setLatencyResult(null);
-              setLatencyError("");
-              latencyDialog.current?.showModal();
             }}
           >
-            Measure latency…
+            Save a recording
           </MenuItem>
-          <label className="menu-slider">
-            Compensation <output>{settings.offset} ms</output>
-            <input
-              aria-label="Input / output compensation (ms)"
-              type="range"
-              min="-1000"
-              max="1000"
-              step="10"
+          <div role="separator" className="menu-separator" />
+          <MenuBranch label="Input and timing">
+            <MenuBranch label="Input channel">
+              {["Input 1 / mono", "Input 2 (audio interface)"].map(
+                (label, channel) => (
+                  <MenuItem
+                    key={channel}
+                    radio
+                    checked={settings.channel === channel}
+                    disabled={disabled || !!settings.speakers}
+                    onClick={() => {
+                      change({ channel, timing: false });
+                      closeSettings();
+                    }}
+                  >
+                    {label}
+                  </MenuItem>
+                ),
+              )}
+            </MenuBranch>
+            <MenuItem
               disabled={disabled}
-              value={settings.offset}
-              onChange={(e) =>
-                change({ offset: Number(e.target.value), timing: false })
-              }
-            />
-          </label>
-          <MenuItem
-            checked={settings.timing && !settings.speakers}
-            disabled={disabled || !!settings.speakers}
-            title="Enable only after checking timing with the current input and output."
-            onClick={() => {
-              change({ timing: !settings.timing });
-              closeSettings();
-            }}
-          >
-            Timing checked for this setup
-          </MenuItem>
-          <p className="menu-note">
-            Experimental · recheck after device changes
-          </p>
+              onClick={() => {
+                closeSettings();
+                engine.current.stopPlayback();
+                engine.current.releaseMic();
+                setLatencyResult(null);
+                setLatencyError("");
+                latencyDialog.current?.showModal();
+              }}
+            >
+              Measure latency…
+            </MenuItem>
+            <label className="menu-slider">
+              Compensation <output>{settings.offset} ms</output>
+              <input
+                aria-label="Input / output compensation (ms)"
+                type="range"
+                min="-1000"
+                max="1000"
+                step="10"
+                disabled={disabled}
+                value={settings.offset}
+                onChange={(e) =>
+                  change({ offset: Number(e.target.value), timing: false })
+                }
+              />
+            </label>
+            <MenuItem
+              checked={settings.timing && !settings.speakers}
+              disabled={disabled || !!settings.speakers}
+              title="Enable only after checking timing with the current input and output."
+              onClick={() => {
+                change({ timing: !settings.timing });
+                closeSettings();
+              }}
+            >
+              Timing checked for this setup
+            </MenuItem>
+            <p className="menu-note">
+              Experimental · recheck after device changes
+            </p>
+          </MenuBranch>
         </MenuBranch>
-      </MenuBranch>
+      )}
       <MenuBranch label="View">
         {fullScreenItem}
-        <MenuBranch label="Zoom">
-          <label className="menu-slider">
-            Zoom <output>{Math.round(scoreZoom * 100)}%</output>
-            <input
-              aria-label="View zoom"
-              type="range"
-              min="50"
-              max="200"
-              step="5"
-              value={scoreZoom * 100}
-              onChange={(e) => setScoreZoom(Number(e.target.value) / 100)}
-            />
-          </label>
-          <MenuItem onClick={() => setScoreZoom(1)}>Reset to 100%</MenuItem>
-        </MenuBranch>
+        {zoomMenu}
       </MenuBranch>
       <MenuBranch label={`Tempo · ${Math.round(settings.speed * 100)}%`}>
         <label className="menu-slider">
@@ -1213,9 +1252,7 @@ export default function App() {
         </MenuItem>
       </MenuBranch>
       {disabled && (
-        <p className="menu-note">
-          Some playback and recording settings require stopping.
-        </p>
+        <p className="menu-note">Some settings require stopping playback.</p>
       )}
     </div>
   );
@@ -1259,9 +1296,11 @@ export default function App() {
       <MenuItem disabled={!loaded} onClick={() => void exportBackup(false)}>
         Export
       </MenuItem>
-      <MenuItem disabled={!loaded} onClick={() => void exportBackup(true)}>
-        Export with voice recordings
-      </MenuItem>
+      {detectionEnabled && (
+        <MenuItem disabled={!loaded} onClick={() => void exportBackup(true)}>
+          Export with voice recordings
+        </MenuItem>
+      )}
       <MenuItem
         disabled={!loaded}
         title="Restore adds copies and preserves existing data."
@@ -1276,19 +1315,23 @@ export default function App() {
   );
   const libraryMenu = (
     <div role="menu" aria-label="Library menu" onKeyDown={navigateMenu}>
+      {detectionItem}
       <MenuBranch label="Import">{importItems}</MenuBranch>
       <MenuBranch label="Backup">{backupItems}</MenuBranch>
       <MenuBranch label="View">
         {fullScreenItem}
-        <MenuItem
-          disabled={!loaded}
-          onClick={() => {
-            closeSettings();
-            setScreen("library");
-          }}
-        >
-          View practice history
-        </MenuItem>
+        {zoomMenu}
+        {detectionEnabled && (
+          <MenuItem
+            disabled={!loaded}
+            onClick={() => {
+              closeSettings();
+              setScreen("library");
+            }}
+          >
+            View practice history
+          </MenuItem>
+        )}
       </MenuBranch>
     </div>
   );
@@ -1449,7 +1492,7 @@ export default function App() {
           <h1>Opening your local library…</h1>
         </main>
       ) : screen === "prepare" ? (
-        <main className="library-home">
+        <main className="library-home" style={{ zoom: libraryZoom }}>
           <section className="piece-choice panel">
             {reloadFallback && (
               <div className="row notice" role="status">
@@ -1574,7 +1617,10 @@ export default function App() {
             <div className="practice-title">
               <strong>{piece.title}</strong>
               <div className="muted">
-                {currentPart?.name || "No part selected"} · Bar{" "}
+                {detectionEnabled && (
+                  <>{currentPart?.name || "No part selected"} · </>
+                )}
+                Bar{" "}
                 {Math.min(
                   piece.bars.length,
                   barAt(
@@ -1584,9 +1630,11 @@ export default function App() {
                 )}
               </div>
             </div>
-            {(record || settings.loop) && (
+            {((detectionEnabled && record) || settings.loop) && (
               <span className="record-status">
-                {record ? "● Recording enabled" : "Direct loop"}
+                {detectionEnabled && record
+                  ? "● Recording enabled"
+                  : "Direct loop"}
               </span>
             )}
             <ImportWarnings key={piece.id} warnings={piece.importWarnings} />
@@ -1602,15 +1650,17 @@ export default function App() {
                 </button>
               ) : (
                 <>
-                  <button
-                    className="icon-button"
-                    disabled={starting}
-                    aria-label="Sing my part"
-                    title={starting ? "Opening audio…" : "Sing my part"}
-                    onClick={() => void start(true)}
-                  >
-                    <TransportIcon kind="sing" />
-                  </button>
+                  {detectionEnabled && (
+                    <button
+                      className="icon-button"
+                      disabled={starting}
+                      aria-label="Sing my part"
+                      title={starting ? "Opening audio…" : "Sing my part"}
+                      onClick={() => void start(true)}
+                    >
+                      <TransportIcon kind="sing" />
+                    </button>
+                  )}
                   <button
                     className="icon-button"
                     disabled={starting}
@@ -1628,157 +1678,166 @@ export default function App() {
             </div>
           </div>
 
-          <dialog
-            ref={microphoneDialog}
-            className="import-warnings-dialog"
-            aria-labelledby="microphone-title"
-          >
-            <h2 id="microphone-title">Get ready to sing</h2>
-            <p>Choose your part and an available microphone before starting.</p>
-            {!currentPart && (
-              <p role="status">Select the part you want to practise.</p>
-            )}
-            <label>
-              Voice part
-              <select
-                value={settings.part}
-                onChange={(event) => change({ part: event.target.value })}
+          {detectionEnabled && (
+            <>
+              <dialog
+                ref={microphoneDialog}
+                className="import-warnings-dialog"
+                aria-labelledby="microphone-title"
               >
-                <option value="">Choose a part…</option>
-                {piece.parts.map((part) => (
-                  <option key={part.id} value={part.id}>
-                    {part.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {devicePicker}
-            <div className="row">
-              <button
-                disabled={
-                  inputBusy ||
-                  !currentPart ||
-                  !settings.device ||
-                  settings.device === "off" ||
-                  !devices.some((d) => d.deviceId === settings.device)
-                }
-                onClick={() => {
-                  microphoneDialog.current?.close();
-                  void start(true);
+                <h2 id="microphone-title">Get ready to sing</h2>
+                <p>
+                  Choose your part and an available microphone before starting.
+                </p>
+                {!currentPart && (
+                  <p role="status">Select the part you want to practise.</p>
+                )}
+                <label>
+                  Voice part
+                  <select
+                    value={settings.part}
+                    onChange={(event) => change({ part: event.target.value })}
+                  >
+                    <option value="">Choose a part…</option>
+                    {piece.parts.map((part) => (
+                      <option key={part.id} value={part.id}>
+                        {part.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {devicePicker}
+                <div className="row">
+                  <button
+                    disabled={
+                      inputBusy ||
+                      !currentPart ||
+                      !settings.device ||
+                      settings.device === "off" ||
+                      !devices.some((d) => d.deviceId === settings.device)
+                    }
+                    onClick={() => {
+                      microphoneDialog.current?.close();
+                      void start(true);
+                    }}
+                  >
+                    Start singing
+                  </button>
+                  <button
+                    disabled={inputBusy}
+                    onClick={() => {
+                      microphoneDialog.current?.close();
+                      void start(false);
+                    }}
+                  >
+                    Listen without microphone
+                  </button>
+                  <button onClick={() => microphoneDialog.current?.close()}>
+                    Cancel
+                  </button>
+                </div>
+              </dialog>
+              <dialog
+                ref={latencyDialog}
+                className="latency-dialog"
+                aria-labelledby="latency-title"
+                onCancel={cancelLatency}
+                onClose={() => {
+                  latencyAbort.current?.abort();
                 }}
               >
-                Start singing
-              </button>
-              <button
-                disabled={inputBusy}
-                onClick={() => {
-                  microphoneDialog.current?.close();
-                  void start(false);
-                }}
-              >
-                Listen without microphone
-              </button>
-              <button onClick={() => microphoneDialog.current?.close()}>
-                Cancel
-              </button>
-            </div>
-          </dialog>
-          <dialog
-            ref={latencyDialog}
-            className="latency-dialog"
-            aria-labelledby="latency-title"
-            onCancel={cancelLatency}
-            onClose={() => {
-              latencyAbort.current?.abort();
-            }}
-          >
-            <h2 id="latency-title">Measure audio delay</h2>
-            <p>
-              Place one headphone earpiece close to the selected microphone.
-              Keep the room quiet and use a comfortable listening volume. Do not
-              sing or tap along.
-            </p>
-            <p>
-              Keep direct monitoring off during this test. Seven short signals
-              measure the delay and then verify the result. This takes about 12
-              seconds.
-            </p>
-            {devicePicker}
-            <p className="menu-note">
-              Input channel {settings.channel + 1}. To change the channel, close
-              this dialog and use Recording → Input and timing.
-            </p>
-            {settings.speakers && (
-              <p role="alert">
-                Use headphones and turn off Echo reduction before measuring
-                timing.
-              </p>
-            )}
-            {measuringLatency && (
-              <div role="status" aria-live="polite">
+                <h2 id="latency-title">Measure audio delay</h2>
                 <p>
-                  {latencyProgress < 4
-                    ? "Measuring delay…"
-                    : "Verifying the correction…"}{" "}
-                  {latencyProgress}/7 signals captured.
-                </p>
-                <progress
-                  max="7"
-                  value={latencyProgress}
-                  aria-label="Latency measurement progress"
-                />
-              </div>
-            )}
-            {latencyError && <p role="alert">{latencyError}</p>}
-            {latencyResult && (
-              <div role="status">
-                <p>
-                  <strong>
-                    Suggested correction: {latencyResult.offsetMs} ms
-                  </strong>
+                  Place one headphone earpiece close to the selected microphone.
+                  Keep the room quiet and use a comfortable listening volume. Do
+                  not sing or tap along.
                 </p>
                 <p>
-                  Verification passed: {latencyResult.detected}/7 signals
-                  detected, variation {latencyResult.spreadMs} ms, remaining
-                  delay within {latencyResult.verificationMs} ms.
+                  Keep direct monitoring off during this test. Seven short
+                  signals measure the delay and then verify the result. This
+                  takes about 12 seconds.
                 </p>
-                <p>
-                  This checks the audio path. Singing detection remains
-                  experimental. Re-measure after changing your microphone,
-                  headphones or audio routing.
+                {devicePicker}
+                <p className="menu-note">
+                  Input channel {settings.channel + 1}. To change the channel,
+                  close this dialog and use Recording → Input and timing.
                 </p>
-              </div>
-            )}
-            <p className="menu-note">
-              Test audio stays on this device and is discarded. Microphone
-              capture ends after the test or when cancelled. The correction is
-              saved only when you apply it.
-            </p>
-            <div className="row">
-              <button
-                disabled={
-                  measuringLatency ||
-                  inputBusy ||
-                  !settings.device ||
-                  settings.device === "off" ||
-                  !!settings.speakers ||
-                  !devices.some((device) => device.deviceId === settings.device)
-                }
-                onClick={() => void runLatencyMeasurement()}
-              >
-                {latencyResult ? "Measure again" : "Start measurement"}
-              </button>
-              {latencyResult && (
-                <button disabled={measuringLatency} onClick={applyLatency}>
-                  Use correction and enable timing
-                </button>
-              )}
-              <button onClick={cancelLatency}>
-                {measuringLatency ? "Cancel measurement" : "Close"}
-              </button>
-            </div>
-          </dialog>
+                {settings.speakers && (
+                  <p role="alert">
+                    Use headphones and turn off Echo reduction before measuring
+                    timing.
+                  </p>
+                )}
+                {measuringLatency && (
+                  <div role="status" aria-live="polite">
+                    <p>
+                      {latencyProgress < 4
+                        ? "Measuring delay…"
+                        : "Verifying the correction…"}{" "}
+                      {latencyProgress}/7 signals captured.
+                    </p>
+                    <progress
+                      max="7"
+                      value={latencyProgress}
+                      aria-label="Latency measurement progress"
+                    />
+                  </div>
+                )}
+                {latencyError && <p role="alert">{latencyError}</p>}
+                {latencyResult && (
+                  <div role="status">
+                    <p>
+                      <strong>
+                        Suggested correction: {latencyResult.offsetMs} ms
+                      </strong>
+                    </p>
+                    <p>
+                      Verification passed: {latencyResult.detected}/7 signals
+                      detected, variation {latencyResult.spreadMs} ms, remaining
+                      delay within {latencyResult.verificationMs} ms.
+                    </p>
+                    <p>
+                      This checks the audio path. Singing detection remains
+                      experimental. Re-measure after changing your microphone,
+                      headphones or audio routing.
+                    </p>
+                  </div>
+                )}
+                <p className="menu-note">
+                  Test audio stays on this device and is discarded. Microphone
+                  capture ends after the test or when cancelled. The correction
+                  is saved only when you apply it.
+                </p>
+                <div className="row">
+                  <button
+                    disabled={
+                      measuringLatency ||
+                      inputBusy ||
+                      !settings.device ||
+                      settings.device === "off" ||
+                      !!settings.speakers ||
+                      !devices.some(
+                        (device) => device.deviceId === settings.device,
+                      )
+                    }
+                    onClick={() => void runLatencyMeasurement()}
+                  >
+                    {latencyResult ? "Measure again" : "Start measurement"}
+                  </button>
+                  {latencyResult && (
+                    <button disabled={measuringLatency} onClick={applyLatency}>
+                      Use correction and enable timing
+                    </button>
+                  )}
+                  <button onClick={cancelLatency}>
+                    {measuringLatency ? "Cancel measurement" : "Close"}
+                  </button>
+                </div>
+              </dialog>
+            </>
+          )}
           <Score
+            detectionEnabled={detectionEnabled}
             piece={piece}
             zoom={scoreZoom}
             settings={settings}
@@ -1812,87 +1871,89 @@ export default function App() {
             onSpeed={changeSpeed}
             onRange={selectPassage}
           />
-          <div className="feedback" role="status">
-            {noteResults.length > 0 && (
-              <span
-                className="note-rating"
-                title={noteResults.at(-1)?.detail}
-                style={{
-                  color: noteResults.at(-1)?.grade
-                    ? GRADE_COLORS[noteResults.at(-1)!.grade!]
-                    : undefined,
-                }}
-              >
-                {noteResults.at(-1)?.grade ?? "Not assessed"}
+          {detectionEnabled && (
+            <div className="feedback" role="status">
+              {noteResults.length > 0 && (
+                <span
+                  className="note-rating"
+                  title={noteResults.at(-1)?.detail}
+                  style={{
+                    color: noteResults.at(-1)?.grade
+                      ? GRADE_COLORS[noteResults.at(-1)!.grade!]
+                      : undefined,
+                  }}
+                >
+                  {noteResults.at(-1)?.grade ?? "Not assessed"}
+                </span>
+              )}
+              <span>
+                {!running
+                  ? noteResults.length
+                    ? "Performance saved · Scroll the score to review"
+                    : "Ready when you are"
+                  : time < secondsAt(piece, piece.bars[settings.from].start)
+                    ? "Starting notes / count-in…"
+                    : !startConfig.current?.practice
+                      ? "Listening to the rehearsal mix"
+                      : frame && frame.rms > 0.0025
+                        ? cents === null
+                          ? "Listening · no confident target match"
+                          : Math.abs(cents) <= 25
+                            ? "On pitch"
+                            : `${Math.abs(cents)} cents ${cents > 0 ? "high" : "low"}`
+                        : "Sing into the selected microphone"}
               </span>
-            )}
-            <span>
-              {!running
-                ? noteResults.length
-                  ? "Performance saved · Scroll the score to review"
-                  : "Ready when you are"
-                : time < secondsAt(piece, piece.bars[settings.from].start)
-                  ? "Starting notes / count-in…"
-                  : !startConfig.current?.practice
-                    ? "Listening to the rehearsal mix"
-                    : frame && frame.rms > 0.0025
-                      ? cents === null
-                        ? "Listening · no confident target match"
-                        : Math.abs(cents) <= 25
-                          ? "On pitch"
-                          : `${Math.abs(cents)} cents ${cents > 0 ? "high" : "low"}`
-                      : "Sing into the selected microphone"}
-            </span>
-            <span>
-              {frame?.midi !== null &&
-              frame?.midi !== undefined &&
-              frame.confidence >= 0.85
-                ? noteLabel(frame.midi)
-                : "—"}{" "}
-              <small>
-                {!running && noteResults.length
-                  ? "Completed note grades"
-                  : settings.timing && !settings.speakers
-                    ? "Pitch + onset grades"
-                    : "Pitch grades · timing not calibrated"}
-              </small>
-            </span>
-            <meter
-              aria-label="Microphone level"
-              min="0"
-              max="0.15"
-              value={frame?.rms || 0}
-            />
-            <details className="grade-help">
-              <summary>Grades</summary>
-              <div>
-                {Object.entries(GRADE_COLORS).map(([grade, color]) => (
-                  <p key={grade} style={{ color }}>
-                    <strong>{grade}</strong>
+              <span>
+                {frame?.midi !== null &&
+                frame?.midi !== undefined &&
+                frame.confidence >= 0.85
+                  ? noteLabel(frame.midi)
+                  : "—"}{" "}
+                <small>
+                  {!running && noteResults.length
+                    ? "Completed note grades"
+                    : settings.timing && !settings.speakers
+                      ? "Pitch + onset grades"
+                      : "Pitch grades · timing not calibrated"}
+                </small>
+              </span>
+              <meter
+                aria-label="Microphone level"
+                min="0"
+                max="0.15"
+                value={frame?.rms || 0}
+              />
+              <details className="grade-help">
+                <summary>Grades</summary>
+                <div>
+                  {Object.entries(GRADE_COLORS).map(([grade, color]) => (
+                    <p key={grade} style={{ color }}>
+                      <strong>{grade}</strong>
+                    </p>
+                  ))}
+                  <p>
+                    Pitch: Perfect ≤25 cents, Great ≤50, OK ≤100, Poor &gt;100.
                   </p>
-                ))}
-                <p>
-                  Pitch: Perfect ≤25 cents, Great ≤50, OK ≤100, Poor &gt;100.
-                </p>
-                <p>
-                  Onset: Perfect ≤60 ms, Great ≤120, OK ≤200, Poor &gt;200. The
-                  lower grade wins when timing is available.
-                </p>
-                <p>
-                  Missed means observed silence. Uncertain input is not
-                  assessed. Timing requires checked latency compensation;
-                  repeated same-pitch entries may be unavailable.
-                </p>
-                <p>
-                  Notes are colored after they finish. Hover or focus a note for
-                  details; click to hear it while stopped.
-                </p>
-              </div>
-            </details>
-          </div>
+                  <p>
+                    Onset: Perfect ≤60 ms, Great ≤120, OK ≤200, Poor &gt;200.
+                    The lower grade wins when timing is available.
+                  </p>
+                  <p>
+                    Missed means observed silence. Uncertain input is not
+                    assessed. Timing requires checked latency compensation;
+                    repeated same-pitch entries may be unavailable.
+                  </p>
+                  <p>
+                    Notes are colored after they finish. Hover or focus a note
+                    for details; click to hear it while stopped.
+                  </p>
+                </div>
+              </details>
+            </div>
+          )}
         </>
       ) : (
-        <main className="history-page">
+        <main className="history-page" style={{ zoom: libraryZoom }}>
           <section className="panel history">
             <h3>Practice history</h3>
             {lib.attempts.length ? (
