@@ -1,6 +1,7 @@
 import { measureLatency } from "./latency-audio";
 import type { LatencyResult } from "./latency";
 import { playbackEndTick } from "./rehearsal";
+import { LibraryIcon } from "./LibraryIcon";
 import { TransportIcon } from "./TransportIcon";
 import { WebsiteImportDialog } from "./WebsiteImportDialog";
 import { PieceLibrary } from "./PieceLibrary";
@@ -79,7 +80,9 @@ export default function App() {
     [time, setTime] = useState(0),
     [frame, setFrame] = useState<Frame | null>(null),
     [samples, setSamples] = useState<Sample[]>([]),
-    [drawer, setDrawer] = useState<"audio" | "library" | null>(null),
+    [drawer, setDrawer] = useState<
+      "audio" | "library" | "import" | "backup" | null
+    >(null),
     [last, setLast] = useState<Attempt | null>(null),
     [recordingURL, setRecordingURL] = useState(""),
     [recordingType, setRecordingType] = useState(""),
@@ -1215,46 +1218,52 @@ export default function App() {
       setError("Backup export failed: " + message(e));
     }
   }
+  const importItems = (
+    <>
+      <MenuItem
+        disabled={!loaded || reloading}
+        onClick={() => {
+          closeSettings();
+          file.current?.click();
+        }}
+      >
+        Local file
+      </MenuItem>
+      <MenuItem
+        disabled={!loaded || reloading}
+        onClick={() => {
+          closeSettings();
+          setShowWebsites(true);
+        }}
+      >
+        Web address
+      </MenuItem>
+    </>
+  );
+  const backupItems = (
+    <>
+      <MenuItem disabled={!loaded} onClick={() => void exportBackup(false)}>
+        Export
+      </MenuItem>
+      <MenuItem disabled={!loaded} onClick={() => void exportBackup(true)}>
+        Export with voice recordings
+      </MenuItem>
+      <MenuItem
+        disabled={!loaded}
+        title="Restore adds copies and preserves existing data."
+        onClick={() => {
+          closeSettings();
+          restoreFile.current?.click();
+        }}
+      >
+        Restore
+      </MenuItem>
+    </>
+  );
   const libraryMenu = (
     <div role="menu" aria-label="Library menu" onKeyDown={navigateMenu}>
-      <MenuBranch label="Import">
-        <MenuItem
-          disabled={!loaded || reloading}
-          onClick={() => {
-            closeSettings();
-            file.current?.click();
-          }}
-        >
-          Local File
-        </MenuItem>
-        <MenuItem
-          disabled={!loaded || reloading}
-          onClick={() => {
-            closeSettings();
-            setShowWebsites(true);
-          }}
-        >
-          Website
-        </MenuItem>
-      </MenuBranch>
-      <MenuBranch label="Backup">
-        <MenuItem disabled={!loaded} onClick={() => void exportBackup(false)}>
-          Export
-        </MenuItem>
-        <MenuItem disabled={!loaded} onClick={() => void exportBackup(true)}>
-          Export with voice recordings
-        </MenuItem>
-        <MenuItem
-          disabled={!loaded}
-          title="Restore adds copies and preserves existing data."
-          onClick={() => {
-            closeSettings();
-            restoreFile.current?.click();
-          }}
-        >
-          Restore
-        </MenuItem>
-      </MenuBranch>
+      <MenuBranch label="Import">{importItems}</MenuBranch>
+      <MenuBranch label="Backup">{backupItems}</MenuBranch>
       <MenuItem
         disabled={!loaded}
         onClick={() => {
@@ -1271,11 +1280,17 @@ export default function App() {
       className="icon-button"
       aria-label="Settings"
       title="Settings"
-      aria-expanded={!!drawer}
+      aria-expanded={drawer === "audio" || drawer === "library"}
       aria-controls="settings-popup"
       onClick={(e) => {
         settingsTrigger.current = e.currentTarget;
-        setDrawer(drawer ? null : screen === "practice" ? "audio" : "library");
+        setDrawer(
+          drawer === "audio" || drawer === "library"
+            ? null
+            : screen === "practice"
+              ? "audio"
+              : "library",
+        );
       }}
     >
       <SettingsIcon />
@@ -1286,6 +1301,11 @@ export default function App() {
       ref={settingsPanel}
       id="settings-popup"
       className="drawer settings-popup"
+      style={
+        screen !== "practice"
+          ? { left: settingsTrigger.current?.offsetLeft ?? 0 }
+          : undefined
+      }
       role="region"
       aria-label="Settings"
       onKeyDown={(e) => {
@@ -1296,7 +1316,19 @@ export default function App() {
         }
       }}
     >
-      {screen === "practice" ? audioPanel : libraryMenu}
+      {screen === "practice" ? (
+        audioPanel
+      ) : drawer === "import" || drawer === "backup" ? (
+        <div
+          role="menu"
+          aria-label={drawer === "import" ? "Import" : "Backup"}
+          onKeyDown={navigateMenu}
+        >
+          {drawer === "import" ? importItems : backupItems}
+        </div>
+      ) : (
+        libraryMenu
+      )}
     </aside>
   );
   return (
@@ -1310,7 +1342,7 @@ export default function App() {
         <header inert={reloading}>
           <div className="practice-menu-anchor">
             {menuButton}
-            {settingsPopup}
+            {drawer !== "import" && drawer !== "backup" && settingsPopup}
           </div>
           <a
             className="brand"
@@ -1440,6 +1472,35 @@ export default function App() {
               <PieceLibrary
                 pieces={lib.pieces}
                 layout={layout}
+                rootActions={
+                  <span
+                    className="library-shortcuts"
+                    onClick={(event) => event.preventDefault()}
+                  >
+                    {screen === "prepare" &&
+                      (["import", "backup"] as const).map((action) => (
+                        <button
+                          key={action}
+                          className="library-action library-shortcut"
+                          aria-label={action === "import" ? "Import" : "Backup"}
+                          title={action === "import" ? "Import" : "Backup"}
+                          aria-haspopup="menu"
+                          aria-expanded={drawer === action}
+                          aria-controls="settings-popup"
+                          disabled={!loaded || reloading}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            settingsTrigger.current = event.currentTarget;
+                            setDrawer(drawer === action ? null : action);
+                          }}
+                        >
+                          <LibraryIcon kind={action} />
+                        </button>
+                      ))}
+                    {(drawer === "import" || drawer === "backup") &&
+                      settingsPopup}
+                  </span>
+                }
                 onChange={(layout) => update({ ...libRef.current, layout })}
                 onSelect={selectPiece}
                 onDelete={(itemId) => void removePiece(itemId)}

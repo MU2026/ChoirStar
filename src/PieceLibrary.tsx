@@ -1,4 +1,5 @@
-import { useState, type DragEvent } from "react";
+import { LibraryIcon } from "./LibraryIcon";
+import { useState, type ReactNode, type DragEvent } from "react";
 import type { LibraryItem, LibraryLayout, Piece } from "./model";
 import {
   addLibraryFolder,
@@ -15,6 +16,7 @@ export function PieceLibrary({
   onDelete,
   onReload,
   reloading,
+  rootActions,
 }: {
   pieces: Piece[];
   layout: LibraryLayout;
@@ -23,6 +25,7 @@ export function PieceLibrary({
   onDelete: (itemId: string) => void;
   onReload: (pieceId: string) => void;
   reloading: boolean;
+  rootActions?: ReactNode;
 }) {
   const piecesById = new Map(pieces.map((piece) => [piece.id, piece]));
   const [dragging, setDragging] = useState<string | null>(null);
@@ -174,7 +177,7 @@ export function PieceLibrary({
                 edit("create", item);
               }}
             >
-              +
+              <LibraryIcon kind="new-folder" />
             </button>
             <button
               type="button"
@@ -452,6 +455,7 @@ export function PieceLibrary({
           onDrop={(e) => finishDrop(e)}
         >
           <span className="folder-title">Library</span>
+          {rootActions}
           <span className="library-actions">
             <button
               type="button"
@@ -464,7 +468,7 @@ export function PieceLibrary({
                 edit("create");
               }}
             >
-              +
+              <LibraryIcon kind="new-folder" />
             </button>
           </span>
         </summary>

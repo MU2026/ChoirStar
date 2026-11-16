@@ -1627,3 +1627,33 @@ audio {
 .latency-dialog .row {
   flex-wrap: wrap;
 }
+
+.library-action:has(svg) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.library-shortcuts {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  gap: 2px;
+  margin-left: 6px;
+}
+.library-shortcut {
+  width: 24px;
+  height: 24px;
+  padding: 3px;
+}
+.library-shortcut svg {
+  width: 16px;
+  height: 16px;
+}
+.library-shortcut[aria-expanded="true"] {
+  background: var(--accent);
+  color: white;
+}
+.library-root > summary > .folder-title {
+  flex: none;
+}

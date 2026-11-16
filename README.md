@@ -6,7 +6,7 @@ Try it at https://mu2026.github.io/ChoirStar/ . This is an early prototype, desi
 
 ## Practice
 
-Open the library hamburger menu and use **Import → Local File** or **Import → Website** to add scores, then select a piece to open practice. Staff names collapse their notation; the pitch view collapses separately. Open **Mixer** to select **My part** with the microphone icon and adjust each staff's Boost, Solo, Mute and volume controls. A singing round requires an explicitly selected part and available microphone.
+Use the small **Import** up-arrow beside **Library** and choose **Local file** or **Web address** (also available in the hamburger menu) to add scores, then select a piece to open practice. Staff names collapse their notation; the pitch view collapses separately. Open **Mixer** to select **My part** with the microphone icon and adjust each staff's Boost, Solo, Mute and volume controls. A singing round requires an explicitly selected part and available microphone.
 
 Click the score to place the cursor; clicking during playback resumes from that position. A stopped note click also previews its sounding pitch. Drag the bar ruler to choose a repeating passage and use Escape to clear it. The Mixer includes Starting pitches, Metronome and tempo controls. Starting pitches are enabled by default and play before ordinary starts and loop iterations; ordinary starts also include a count-in. Tempo can change during playback without changing pitch.
 
@@ -28,7 +28,7 @@ NWC conversion runs locally for binary NWC 1.75/2.0/2.01, embedded-text NWC 2.75
 
 ## Your data
 
-Scores, profiles, results and optional recordings stay in browser storage on your device. ChoirStar does not upload them or use analytics. GitHub Pages serves the application and receives normal web requests. Clearing site data can erase your library. Use **Backup** in the library menu to export or restore data; recordings are included only when explicitly chosen. Use **View practice history** to review results and manage recordings. Different devices and site addresses have separate libraries.
+Scores, profiles, results and optional recordings stay in browser storage on your device. ChoirStar does not upload them or use analytics. GitHub Pages serves the application and receives normal web requests. Clearing site data can erase your library. Use the small **Backup** down-arrow beside **Library** or **Backup** in the library menu to export or restore data; recordings are included only when explicitly chosen. Use **View practice history** to review results and manage recordings. Different devices and site addresses have separate libraries.
 
 No copyrighted repertoire or recordings are bundled. Test scores are synthetic.
 
