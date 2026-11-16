@@ -1,6 +1,10 @@
 import type { WebsiteCatalogue } from "./website";
 import { Midi } from "@tonejs/midi";
 export interface Note {
+  slurStart?: boolean;
+  slurStop?: boolean;
+  tupletActual?: number;
+  tupletNormal?: number;
   spelling?: { note: string; octave: number };
   id: string;
   midi: number;
@@ -29,6 +33,7 @@ export interface Tempo {
   bpm: number;
 }
 export interface Bar {
+  lyricPass?: number;
   key?: number;
   start: number;
   end: number;
@@ -48,13 +53,18 @@ export interface Piece {
   key: number;
 }
 export interface Mix {
+  solo?: boolean;
+  boost?: boolean;
   volume: number;
   mute: boolean;
   visible: boolean;
 }
 export interface Settings {
+  initialPitches?: boolean;
+  metronome?: boolean;
   instrument?: import("./instruments").Instrument;
   speakers?: boolean;
+  partSelectionConfirmed?: boolean;
   part: string;
   mix: Record<string, Mix>;
   speed: number;
@@ -167,7 +177,7 @@ export function tickAt(piece: Piece, sec: number): number {
 export function barAt(piece: Piece, tick: number) {
   return Math.max(
     0,
-    piece.bars.findIndex((b) => tick >= b.start && tick < b.end),
+    piece.bars.findIndex((b) => tick + 1e-6 >= b.start && tick + 1e-6 < b.end),
   );
 }
 export function importMidi(data: ArrayBuffer, filename: string): Piece {
@@ -280,10 +290,11 @@ export function importMidi(data: ArrayBuffer, filename: string): Piece {
 }
 export function defaults(p: Piece): Settings {
   return {
-    part: p.parts[0].id,
+    part: "",
     mix: Object.fromEntries(
       p.parts.map((t) => [t.id, { volume: 0.65, mute: false, visible: true }]),
     ),
+    initialPitches: true,
     instrument: "piano",
     speed: 0.8,
     from: 0,

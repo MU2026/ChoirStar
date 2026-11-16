@@ -163,3 +163,27 @@ it("retains note grades and details through backup restoration", () => {
   );
   expect(restored.library.attempts[0].results).toEqual(results);
 });
+
+it("does not grade skipped notes or a partly heard note after seeking", () => {
+  const p = piece(),
+    s = { ...defaults(p), speed: 1 };
+  const after = {
+    ...p.parts[0].notes[0],
+    id: "after",
+    tick: 2500,
+    length: 500,
+  };
+  p.parts[0].notes.push(after);
+  const samples = [
+    ...frames(),
+    ...Array.from({ length: 25 }, (_, i) => ({
+      time: 2.5 + i * 0.02,
+      midi: 60,
+      confidence: 1,
+      rms: 0.1,
+    })),
+  ];
+  const results = completedFeedback(p, p.parts[0], samples, s, 4, [], 1.5);
+  expect(results.map((r) => r.note)).toEqual(["after"]);
+  expect(results[0].grade).toBe("Perfect");
+});

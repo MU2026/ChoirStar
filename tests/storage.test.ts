@@ -73,6 +73,27 @@ describe("local library and backups", () => {
     expect(a.recording).not.toBe("r");
     expect((await getRecording(a.recording!))?.size).toBe(5);
     expect(Object.values(next.settings)[1].timing).toBe(false);
+    expect(Object.values(next.settings)[1].part).toBe("");
+  });
+  it("preserves explicit part choices in backups and rejects unknown parts", () => {
+    const l = fixture();
+    const settings = Object.values(l.settings)[0];
+    settings.part = l.pieces[0].parts[1].id;
+    settings.partSelectionConfirmed = true;
+    const backup = () =>
+      JSON.stringify({
+        format: "ChoirStar backup",
+        library: l,
+        recordings: {},
+      });
+    expect(
+      Object.values(parseBackup(backup()).library.settings)[0],
+    ).toMatchObject({
+      part: settings.part,
+      partSelectionConfirmed: true,
+    });
+    settings.part = "unknown-part";
+    expect(() => parseBackup(backup())).toThrow("associations");
   });
   it("rejects invalid schemas and broken associations before restoring", () => {
     expect(() => parseBackup("{}")).toThrow();

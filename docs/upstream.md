@@ -43,3 +43,14 @@ Header alignment correction, 2026-11-04: both notation styles now use the measur
 Beam/flag correction, 2026-11-04: `scoreRenderer.ts` draws independent flags only for ungrouped notes. Beamed groups with mixed short durations retain their extra subdivision as secondary beam segments or short beamlets, instead of attaching a flag to a beamed note. Regression coverage exercises equal eighths, eighth/sixteenth pairs, isolated eighths, both stem directions and both notation styles.
 
 Single notation style, 2026-11-04: Bravura symbols are now the only notation style. Removed the original geometric noteheads, hand-drawn rests/flags and text accidentals, together with the style option, practice toolbar switch and associated view state. Rhythm spacing, beam handling and pitch overlay coordinates remain shared with the existing renderer. Earlier entries above describe the incremental implementation history.
+
+
+## Singing icon, 2026-11-07
+
+Source: https://github.com/lucide-icons/lucide at commit `53fab88ff9d1b48f4704b5b5b560d6b4d560bf4c`, original file `icons/mic-vocal.svg`. Copyright (c) 2026 Lucide Icons and Contributors; ISC license, retained in `public/licenses/lucide-ISC.txt`. Reviewed the SVG geometry and license. This static icon has no dependencies or executable behavior.
+
+Adapted into the singing branch of `TransportIcon` in `src/App.tsx`, replacing the singing-person icon with the user-selected Singing preview. Local modifications: JSX attribute names and inherited 22px size / 1.8 stroke width to match the transport controls. No runtime package was added.
+
+Local refinement, 2026-11-07: extracted the existing transport icons to `src/TransportIcon.tsx` and reused the licensed handheld microphone for the compact staff's assessed-part button. Geometry and license are unchanged.
+
+Local OpenVox refinements, 2026-11-07: `scoreRenderer.ts` accepts optional measure padding, shared by note and cursor positioning, so cropped practice bars retain leading accidentals. Slurs require an explicit endpoint, avoiding a fabricated short slur when the actual endpoint is outside the rendered bar. The ChoirStar adapter now passes imported slur markers, omits note content from the fixed clef header, and inserts changing time signatures into the affected staff bars. No new upstream code or dependency was imported.

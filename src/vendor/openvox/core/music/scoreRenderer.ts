@@ -1,4 +1,5 @@
 // ChoirStar modification, 2026-11-04: traditional Bravura symbols.
+// 2026-11-07: configurable measure padding keeps leading accidentals inside cropped bars.
 import { musicSymbol, musicAccidental, musicTimeNumber } from "../../../bravura/symbols";
 import type { MusicalNoteEvent, ScoreDocument } from '../../types';
 import { parseNoteSpelling, resolveNoteSpelling, staffStepForEvent, synchronizeNotePitch } from './notes';
@@ -14,6 +15,7 @@ import {
 } from './scoreModel';
 
 export interface ScoreRenderOptions {
+  measurePadding?: number;
   selectedEventId?: string | null;
   showPitchLabels?: boolean;
   cursorBeat?: number | null;
@@ -411,6 +413,7 @@ function buildBeamGroups(
 }
 
 export function renderScoreSvg(score: ScoreDocument, width = 1200, options: ScoreRenderOptions = {}): string {
+  const innerPadding = options.measurePadding ?? 18;
   const timing = scoreTiming(score);
   const timeline = buildNotationTimeline(score);
   const polyphonic = new Set(score.notes.filter((event) => !event.isRest).map((event) => event.voice || 1)).size > 1;
@@ -475,7 +478,7 @@ export function renderScoreSvg(score: ScoreDocument, width = 1200, options: Scor
         const measureX = firstMeasureLeft + localMeasure * measureWidth;
         const localBeat = cursorBeat - cursorMeasure * timing.measureBeats;
         const spacing = spacingByMeasure.get(cursorMeasure) || { anchors: [0, timing.measureBeats], positions: [0, 1] };
-        const cursorX = measureX + 18 + spacingPosition(spacing, localBeat) * Math.max(24, measureWidth - 36);
+        const cursorX = measureX + innerPadding + spacingPosition(spacing, localBeat) * Math.max(24, measureWidth - innerPadding * 2);
         fragments.push(
           `<line x1="${cursorX}" y1="${staffTop - 18}" x2="${cursorX}" y2="${staffTop + 58}" stroke="#b89045" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.85" data-score-cursor="true"/>`
         );
@@ -518,7 +521,6 @@ export function renderScoreSvg(score: ScoreDocument, width = 1200, options: Scor
     for (const event of systemEvents) {
       const localMeasure = event.measureIndex - systemStartMeasure;
       const measureX = firstMeasureLeft + localMeasure * measureWidth;
-      const innerPadding = 18;
       const usableWidth = Math.max(24, measureWidth - innerPadding * 2);
       const spacing = spacingByMeasure.get(event.measureIndex) || {
         anchors: [0, timing.measureBeats],
@@ -741,7 +743,7 @@ export function renderScoreSvg(score: ScoreDocument, width = 1200, options: Scor
   for (let index = 0; index < pitchedTimeline.length - 1; index += 1) {
     const event = pitchedTimeline[index];
     if (!event.slurStart) continue;
-    const next = pitchedTimeline.slice(index + 1).find((candidate) => candidate.slurStop) || pitchedTimeline[index + 1];
+    const next = pitchedTimeline.slice(index + 1).find((candidate) => candidate.slurStop);
     if (!next) continue;
     const a = notePositions.get(event.id);
     const b = notePositions.get(next.id);

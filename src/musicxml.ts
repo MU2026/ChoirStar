@@ -230,7 +230,31 @@ export function importMusicXml(
               "Unsupported MusicXML pitch (microtones are not supported).",
             );
           const ties = children(el, "tie").map((t) => t.getAttribute("type"));
+          const modification = child(el, "time-modification");
+          const slurs = children(child(el, "notations") ?? el, "slur");
           notes.push({
+            ...(slurs.some((s) => s.getAttribute("type") === "start")
+              ? { slurStart: true }
+              : {}),
+            ...(slurs.some((s) => s.getAttribute("type") === "stop")
+              ? { slurStop: true }
+              : {}),
+            ...(modification
+              ? {
+                  tupletActual: number(
+                    value(modification, "actual-notes"),
+                    "tuplet actual notes",
+                    1,
+                    64,
+                  ),
+                  tupletNormal: number(
+                    value(modification, "normal-notes"),
+                    "tuplet normal notes",
+                    1,
+                    64,
+                  ),
+                }
+              : {}),
             lyrics: children(el, "lyric")
               .filter(
                 (l) =>
@@ -463,13 +487,22 @@ export function importMusicXml(
     if (changes.length) bpm = changes[changes.length - 1].bpm;
     return { start, changes };
   });
+  const visits = new Map<number, number>();
   for (const i of order) {
+    const lyricPass = (visits.get(i) ?? 0) + 1;
+    visits.set(i, lyricPass);
     const b = source[i],
       tempo = sourceBpm[i];
     tempos.push({ tick: end, bpm: tempo.start });
     for (const t of tempo.changes)
       tempos.push({ tick: end + t.tick, bpm: t.bpm });
-    bars.push({ start: end, end: end + b.length, meter: b.meter, key: b.key });
+    bars.push({
+      start: end,
+      end: end + b.length,
+      meter: b.meter,
+      key: b.key,
+      lyricPass,
+    });
     end += b.length;
   }
   const parts = parsed.flatMap((p) => {

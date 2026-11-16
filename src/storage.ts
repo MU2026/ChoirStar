@@ -12,6 +12,10 @@ const nonnegative = number.nonnegative();
 const id = z.string().min(1).max(200);
 const text = z.string().max(1000);
 const note = z.object({
+  slurStart: z.boolean().optional(),
+  slurStop: z.boolean().optional(),
+  tupletActual: z.number().int().min(1).max(64).optional(),
+  tupletNormal: z.number().int().min(1).max(64).optional(),
   spelling: z
     .object({ note: z.string().max(4), octave: number.int().min(-1).max(9) })
     .optional(),
@@ -42,12 +46,17 @@ const part = z.object({
   clefOctaveChange: z.number().int().min(-1).max(1).optional(),
 });
 const settings = z.object({
+  initialPitches: z.boolean().optional(),
+  metronome: z.boolean().optional(),
   instrument: z.enum(["piano", "choir", "organ", "strings"]).optional(),
   speakers: z.boolean().optional(),
-  part: id,
+  part: z.union([id, z.literal("")]),
+  partSelectionConfirmed: z.boolean().optional(),
   mix: z.record(
     z.string(),
     z.object({
+      solo: z.boolean().optional(),
+      boost: z.boolean().optional(),
       volume: number.min(0).max(1),
       mute: z.boolean(),
       visible: z.boolean(),
@@ -105,6 +114,7 @@ const librarySchema = z.object({
         bars: z
           .array(
             z.object({
+              lyricPass: z.number().int().min(1).max(20000).optional(),
               key: number.int().min(-7).max(7).optional(),
               start: nonnegative,
               end: nonnegative,
@@ -353,7 +363,7 @@ export function parseBackup(text: string) {
       extra !== undefined ||
       !p ||
       !l.profiles.some((p) => p.id === profile) ||
-      !p.parts.some((t) => t.id === s.part) ||
+      (s.part !== "" && !p.parts.some((t) => t.id === s.part)) ||
       s.from > s.to ||
       s.to >= p.bars.length ||
       p.parts.some((t) => !s.mix[t.id]) ||
@@ -423,7 +433,7 @@ export async function restore(
     const [profile, piece] = key.split(":");
     const p = lib.pieces.find((p) => p.id === remap(piece));
     if (!p || s.from > s.to || s.to >= p.bars.length) continue;
-    s.part = remap(s.part);
+    if (s.part) s.part = remap(s.part);
     s.mix = Object.fromEntries(
       Object.entries(s.mix).map(([key, value]) => [remap(key), value]),
     );

@@ -7,3 +7,5 @@ Runtime dependencies (exact versions in package-lock.json): React, React DOM, @t
 The adapted NWC binary reader is based on music21 10.5.2 (BSD-3-Clause); see public/licenses/music21-BSD-3-Clause.txt. Traditional notation uses SVG outlines extracted from Steinberg's Bravura font (SIL OFL 1.1); see public/licenses/Bravura-OFL.txt. Exact source revisions, attribution and local modifications are recorded in docs/upstream.md.
 
 The published application links to the exact corresponding source revision, including build instructions and the dependency lockfile.
+
+The singing transport icon uses Lucide's mic-vocal icon (ISC), copyright (c) 2026 Lucide Icons and Contributors. See public/licenses/lucide-ISC.txt and docs/upstream.md.

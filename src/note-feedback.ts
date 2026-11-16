@@ -46,11 +46,13 @@ export function completedFeedback(
   settings: Settings,
   until: number,
   previous: NoteResult[] = [],
+  since = -Infinity,
 ): NoteResult[] {
   const done = new Set(previous.map((r) => r.note));
   const notes = part.notes.filter(
     (n) =>
       !done.has(n.id) &&
+      secondsAt(piece, n.tick) >= since - 1e-6 &&
       n.tick >= piece.bars[settings.from].start &&
       n.tick + n.length <= piece.bars[settings.to].end &&
       secondsAt(piece, n.tick + n.length) <= until,

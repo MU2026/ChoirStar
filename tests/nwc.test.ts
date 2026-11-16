@@ -597,3 +597,78 @@ it("uses NWCTXT slur continuation without consuming another lyric token", async 
     ["next", 7680],
   ]);
 });
+
+it("retains triplet ratios, verse visits and their engraving through backup restore", async () => {
+  const commands =
+    "|Bar|Style:LocalRepeatOpen\n" +
+    [0, 1, 2].map((i) => `|Note|Dur:8th,Triplet|Pos:${i}`).join("\n") +
+    "\n|Note|Dur:Half|Pos:0\n|Bar|Style:LocalRepeatClose|Repeat:3";
+  const piece = await importNwc(
+    bytes(score(staff(commands).replace("Signature:4/4", "Signature:3/4"))),
+    "triplets.nwctxt",
+    parse,
+  );
+  expect(piece.parts[0].notes[0]).toMatchObject({
+    tupletActual: 3,
+    tupletNormal: 2,
+    length: 320,
+  });
+  expect(piece.bars.map((b) => b.lyricPass)).toEqual([1, 2, 3]);
+  const restored = parseBackup(
+    JSON.stringify({
+      format: "ChoirStar backup",
+      library: {
+        version: 1,
+        profiles: [],
+        pieces: [piece],
+        settings: {},
+        attempts: [],
+      },
+      recordings: {},
+    }),
+  ).library.pieces[0];
+  expect(restored.bars).toEqual(piece.bars);
+  expect(restored.parts[0].notes).toEqual(piece.parts[0].notes);
+  for (let i = 0; i < 3; i++)
+    expect(notationBar(restored, restored.parts[0], i, 300).svg).not.toContain(
+      'data-event-kind="rest"',
+    );
+});
+
+it("recognizes NWCTXT triplet boundary markers and preserves the first two notes' slur", async () => {
+  const piece = await importNwc(
+    bytes(
+      score(
+        staff(
+          [
+            "|Note|Dur:Half|Pos:0",
+            "|Note|Dur:8th,Triplet=First,Slur|Pos:1",
+            "|Note|Dur:8th,Triplet|Pos:#2",
+            "|Note|Dur:8th,Triplet=End|Pos:0",
+            "|Bar",
+            "|Note|Dur:Half,Dotted|Pos:0",
+          ].join("\n"),
+        ).replace("Signature:4/4", "Signature:3/4"),
+      ),
+    ),
+    "triplet-boundaries.nwctxt",
+    parse,
+  );
+  expect(piece.bars.map((b) => b.end - b.start)).toEqual([2880, 2880]);
+  expect(
+    piece.parts[0].notes
+      .slice(1, 4)
+      .map((n) => [n.tick, n.length, n.tupletActual]),
+  ).toEqual([
+    [1920, 320, 3],
+    [2240, 320, 3],
+    [2560, 320, 3],
+  ]);
+  expect(piece.parts[0].notes[1].slurStart).toBe(true);
+  expect(piece.parts[0].notes[2].slurStop).toBe(true);
+  const svg = notationBar(piece, piece.parts[0], 0, 300).svg;
+  expect(svg.match(/data-score-hitbox/g)).toHaveLength(1);
+  expect(svg).not.toContain('data-event-kind="rest"');
+  expect(svg).toContain('data-score-slur="true"');
+  expect(svg.match(/data-score-tuplet=/g)).toHaveLength(1);
+});

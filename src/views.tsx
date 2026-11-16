@@ -1,5 +1,6 @@
+import { TransportIcon } from "./TransportIcon";
 import { useLayoutEffect, useRef, useState, useMemo, memo } from "react";
-import { lyricLayout } from "./lyrics";
+import { highlightedVerse, lyricLayout } from "./lyrics";
 import { notationBar } from "./notation";
 import { noteLabel } from "./vendor/openvox/core/music/notes";
 import { GRADE_COLORS } from "./note-feedback";
@@ -32,12 +33,18 @@ const EngravedBar = memo(function EngravedBar({
   notes,
   results,
   disabled,
+  seekDisabled,
+  barStart,
+  onSeek,
   onNote,
 }: {
   svg: string;
   notes: Note[];
   results: NoteResult[];
   disabled: boolean;
+  seekDisabled: boolean;
+  barStart: number;
+  onSeek: (tick: number) => void;
   onNote: (midi: number) => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
@@ -58,10 +65,13 @@ const EngravedBar = memo(function EngravedBar({
         );
         group.dataset.graded = String(!!result?.grade);
         group.setAttribute("role", "button");
-        group.setAttribute("tabindex", disabled ? "-1" : "0");
-        group.setAttribute("aria-disabled", String(disabled));
+        group.setAttribute("tabindex", seekDisabled ? "-1" : "0");
+        group.setAttribute("aria-disabled", String(seekDisabled));
         const description = `${noteLabel(note.midi)}${result ? ` · ${result.grade ?? "Not assessed"} · ${result.detail ?? ""}` : ""}`;
-        group.setAttribute("aria-label", `Play ${description}`);
+        group.setAttribute(
+          "aria-label",
+          `${disabled ? "Move cursor to" : "Play and move cursor to"} ${description}`,
+        );
         group.querySelector("title")?.remove();
         const title = document.createElementNS(
           "http://www.w3.org/2000/svg",
@@ -70,13 +80,16 @@ const EngravedBar = memo(function EngravedBar({
         title.textContent = description;
         group.prepend(title);
       });
-  }, [svg, notes, results, disabled]);
-  const play = (target: EventTarget | null) => {
-    if (disabled || !(target instanceof Element)) return;
+  }, [svg, notes, results, disabled, seekDisabled]);
+  const play = (target: EventTarget | null, seek = false) => {
+    if (seekDisabled || !(target instanceof Element)) return;
     const id = target.closest<SVGGElement>('[data-event-kind="note"]')?.dataset
       .eventId;
     const note = notes.find((n) => n.id === id);
-    if (note) onNote(note.midi);
+    if (note) {
+      if (!disabled) onNote(note.midi);
+      if (seek) onSeek(Math.max(barStart, note.tick));
+    }
   };
   return (
     <div
@@ -85,83 +98,121 @@ const EngravedBar = memo(function EngravedBar({
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          play(e.target);
+          play(e.target, true);
         }
       }}
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   );
 });
-function VolumeKnob({
-  name,
-  value,
-  onChange,
+function PartControls({
+  open,
+  part,
+  mix,
+  selected,
+  disabled,
+  onPart,
+  onMix,
 }: {
-  name: string;
-  value: number;
-  onChange: (value: number) => void;
+  open: boolean;
+  part: Piece["parts"][number];
+  mix: Settings["mix"][string];
+  selected: boolean;
+  disabled: boolean;
+  onPart: () => void;
+  onMix: (patch: Partial<Settings["mix"][string]>) => void;
 }) {
-  const drag = useRef<{ y: number; value: number } | null>(null);
-  const set = (v: number) =>
-    onChange(Math.max(0, Math.min(1, Math.round(v * 100) / 100)));
   return (
-    <div
-      className="volume-knob"
-      role="slider"
-      tabIndex={0}
-      aria-label={`${name} volume`}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={Math.round(value * 100)}
-      aria-valuetext={`${Math.round(value * 100)} percent`}
-      title={`${name}: ${Math.round(value * 100)}% · Drag up/down or use arrow keys`}
-      onPointerDown={(e) => {
-        if (e.button !== 0) return;
-        e.preventDefault();
-        e.currentTarget.focus();
-        e.currentTarget.setPointerCapture(e.pointerId);
-        drag.current = { y: e.clientY, value };
-      }}
-      onPointerMove={(e) => {
-        if (drag.current)
-          set(drag.current.value + (drag.current.y - e.clientY) / 150);
-      }}
-      onPointerUp={(e) => {
-        drag.current = null;
-        if (e.currentTarget.hasPointerCapture(e.pointerId))
-          e.currentTarget.releasePointerCapture(e.pointerId);
-      }}
-      onPointerCancel={() => {
-        drag.current = null;
-      }}
-      onLostPointerCapture={() => {
-        drag.current = null;
-      }}
-      onKeyDown={(e) => {
-        const values: Record<string, number> = {
-          ArrowUp: value + 0.05,
-          ArrowRight: value + 0.05,
-          ArrowDown: value - 0.05,
-          ArrowLeft: value - 0.05,
-          Home: 0,
-          End: 1,
-          PageUp: value + 0.1,
-          PageDown: value - 0.1,
-        };
-        if (e.key in values) {
-          e.preventDefault();
-          set(values[e.key]);
-        }
-      }}
-    >
-      <span
-        className="knob-face"
-        aria-hidden="true"
-        style={{ transform: `rotate(${-135 + value * 270}deg)` }}
+    <div className={"part-controls" + (open ? " mixer-open" : "")}>
+      <button
+        className="part-handle"
+        aria-expanded={mix?.visible !== false}
+        aria-label={`${mix?.visible === false ? "Expand" : "Collapse"} ${part.name} staff`}
+        title={`${mix?.visible === false ? "Expand" : "Collapse"} ${part.name} staff`}
+        onClick={() => onMix({ visible: mix?.visible === false })}
       >
-        <i />
-      </span>
-      <small aria-hidden="true">{Math.round(value * 100)}</small>
+        {part.name}
+      </button>
+      {open && (
+        <div
+          className="part-mix-row"
+          role="group"
+          aria-label={`${part.name} controls`}
+        >
+          <button
+            className="part-icon"
+            aria-label={`Practise ${part.name}`}
+            title={`Practise ${part.name}`}
+            aria-pressed={selected}
+            disabled={disabled}
+            onClick={onPart}
+          >
+            <TransportIcon kind="sing" />
+          </button>
+          <button
+            className="part-icon"
+            aria-label={`Boost ${part.name}`}
+            title={`Boost ${part.name}: bring forward and quiet backing parts`}
+            aria-pressed={!!mix?.boost}
+            onClick={() => onMix({ boost: !mix?.boost })}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              aria-hidden="true"
+            >
+              <path d="M2 10h10l8-5v14l-8-5H2zM6 14v4a2 2 0 0 0 4 0v-4M7 7v3M11 7v3M22 8v8" />
+            </svg>
+          </button>
+          <button
+            className="part-icon"
+            aria-label={`Solo ${part.name}`}
+            title={`Solo ${part.name} (multiple parts allowed)`}
+            aria-pressed={!!mix?.solo}
+            onClick={() => onMix({ solo: !mix?.solo })}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              aria-hidden="true"
+            >
+              <path d="M4 14v-3a8 8 0 0 1 16 0v3M4 12H2v8h5v-8zM20 12h2v8h-5v-8z" />
+            </svg>
+          </button>
+          <button
+            className="part-icon"
+            aria-label={`Mute ${part.name}`}
+            title={`Mute ${part.name}`}
+            aria-pressed={mix?.mute || false}
+            onClick={() => onMix({ mute: !mix?.mute })}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              aria-hidden="true"
+            >
+              <path d="M3 9h4l5-4v14l-5-4H3zM16 8q5 4 0 8M3 3l18 18" />
+            </svg>
+          </button>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={mix?.volume ?? 0.6}
+            disabled={!!mix?.mute}
+            aria-label={`${part.name} volume`}
+            title={`${part.name}: ${Math.round((mix?.volume ?? 0.6) * 100)}%`}
+            onChange={(event) => onMix({ volume: Number(event.target.value) })}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -180,6 +231,11 @@ export function Score({
   results,
   feedbackPart,
   onRange,
+  passageDisabled,
+  onSeek,
+  onSpeed,
+  onMetronome,
+  onInitialPitches,
 }: {
   piece: Piece;
   zoom: number;
@@ -194,20 +250,24 @@ export function Score({
   onNote: (midi: number) => void;
   results: NoteResult[];
   feedbackPart: string;
+  passageDisabled: boolean;
+  onSeek: (tick: number) => void;
+  onSpeed: (speed: number) => void;
+  onMetronome: () => void;
+  onInitialPitches: () => void;
   onRange: (range: { from: number; to: number } | null) => void;
 }) {
-  const partChoice = (part: Piece["parts"][number]) => (
-    <label className="part-choice" title={`Practise ${part.name}`}>
-      <input
-        type="radio"
-        name="my-part"
-        checked={settings.part === part.id}
-        disabled={controlsDisabled}
-        onChange={() => onPart(part.id)}
-        aria-label={`My part: ${part.name}`}
-      />
-      <span>My part</span>
-    </label>
+  const [mixerOpen, setMixerOpen] = useState(false);
+  const partControls = (part: Piece["parts"][number]) => (
+    <PartControls
+      open={mixerOpen}
+      part={part}
+      mix={settings.mix[part.id]}
+      selected={settings.part === part.id}
+      disabled={controlsDisabled}
+      onPart={() => onPart(part.id)}
+      onMix={(patch) => onMix(part.id, patch)}
+    />
   );
   const { ref, width } = useWidth();
   const [scrollBar, setScrollBar] = useState(0);
@@ -224,10 +284,17 @@ export function Score({
           ),
         ) *
           14,
-    ) + 88;
+    ) +
+    4 +
+    (mixerOpen ? 220 : 0);
   // Keep the 100% bar width as the zoom baseline, so larger notes also
   // receive more horizontal space instead of being squeezed into four bars.
   const cellWidth = Math.max(120, (width * zoom - labelWidth) / 4);
+  const tempoTick = tickAt(piece, Math.max(0, time));
+  const baseTempo =
+    [...piece.tempos].reverse().find((tempo) => tempo.tick <= tempoTick)?.bpm ??
+    120;
+  const bpm = Math.round(baseTempo * settings.speed);
   const selected =
     settings.from > 0 || settings.to < piece.bars.length - 1 || settings.loop;
   const [draft, setDraft] = useState<{ from: number; to: number } | null>(null);
@@ -291,6 +358,9 @@ export function Score({
   const visibleBars = Math.ceil(Math.max(0, width - labelWidth) / cellWidth);
   const last = Math.min(piece.bars.length, first + visibleBars + 3);
   const parts = piece.parts;
+  const [verseChoices, setVerseChoices] = useState<
+    Record<string, string | undefined>
+  >({});
   const lyricLayouts = useMemo(
     () => new Map(piece.parts.map((p) => [p.id, lyricLayout(p)])),
     [piece],
@@ -350,15 +420,13 @@ export function Score({
       // lower-frequency feedback updates. This also follows tempo changes.
       const liveTick = Math.min(
         piece.end - 1,
-        Math.max(
-          piece.bars[settings.from].start,
-          tickAt(piece, Math.max(0, playbackPosition())),
-        ),
+        Math.max(0, tickAt(piece, Math.max(0, playbackPosition()))),
       );
       const currentBar = barAt(piece, liveTick),
         b = piece.bars[currentBar];
       const position = currentBar + (liveTick - b.start) / (b.end - b.start);
-      viewport.scrollLeft = Math.max(0, (position - 0.75) * cellWidth);
+      if (!rangeDrag.current)
+        viewport.scrollLeft = Math.max(0, (position - 0.75) * cellWidth);
       for (const row of animationCells.current) {
         const cell = row.bars.find((c) => c.index === currentBar);
         const cursors = viewport.querySelectorAll<SVGSVGElement>(
@@ -388,6 +456,37 @@ export function Score({
       style={{ zoom }}
       ref={ref}
       aria-label="Scrollable score"
+      onClick={(event) => {
+        if (
+          passageDisabled ||
+          !(event.target instanceof Element) ||
+          event.target.closest(
+            ".bar-ruler, .staff-label, .lyric-label, .collapsed-staff-label, button, input, select, a",
+          )
+        )
+          return;
+        const el = ref.current!;
+        const bounds = el.getBoundingClientRect();
+        const scale = bounds.width / el.offsetWidth || 1;
+        const x =
+          (event.clientX - bounds.left) / scale + el.scrollLeft - labelWidth;
+        if (x < 0 || x >= piece.bars.length * cellWidth) return;
+        const index = Math.floor(x / cellWidth);
+        const partId =
+          event.target.closest<HTMLElement>(".part-group")?.dataset.part;
+        const row = cells.find((row) => row.part.id === partId) ?? cells[0];
+        const cell = row?.bars.find((cell) => cell.index === index);
+        if (!cell) return;
+        const noteId = event.target.closest<SVGGElement>(
+          '[data-event-kind="note"]',
+        )?.dataset.eventId;
+        const note = row.part.notes.find((note) => note.id === noteId);
+        onSeek(
+          note
+            ? Math.max(piece.bars[index].start, note.tick)
+            : cell.tickAtX(x - index * cellWidth),
+        );
+      }}
       onScroll={(e) =>
         setScrollBar(Math.floor(e.currentTarget.scrollLeft / cellWidth))
       }
@@ -402,7 +501,7 @@ export function Score({
           aria-label="Practice passage: drag to select bars; click selection or press Escape to clear"
           tabIndex={0}
           onKeyDown={(e) => {
-            if (e.key === "Escape" && !controlsDisabled) {
+            if (e.key === "Escape" && !passageDisabled) {
               e.preventDefault();
               endRange(true);
               onRange(null);
@@ -410,7 +509,7 @@ export function Score({
           }}
           onPointerDown={(e) => {
             if (
-              controlsDisabled ||
+              passageDisabled ||
               e.button !== 0 ||
               (e.target as HTMLElement).closest(".ruler-label")
             )
@@ -464,14 +563,99 @@ export function Score({
           onPointerCancel={() => endRange(true)}
           onLostPointerCapture={() => endRange(true)}
         >
-          <span
-            className="ruler-label"
-            style={{ width: labelWidth }}
-            title="Drag across bar numbers to select. Drag either edge to resize. Click the selection or press Escape to clear."
-          >
-            {range
-              ? `Bars ${range.from + 1}–${range.to + 1}`
-              : "Drag bars to loop"}
+          <span className="ruler-label" style={{ width: labelWidth }}>
+            <button
+              className="mixer-toggle"
+              aria-label="Mixer"
+              title="Show or hide all part mixers"
+              aria-expanded={mixerOpen}
+              onClick={() => setMixerOpen((open) => !open)}
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                aria-hidden="true"
+              >
+                <path d="M5 3v7m0 4v7M12 3v11m0 4v3M19 3v3m0 4v11M2 10h6M9 14h6M16 6h6" />
+              </svg>
+            </button>
+            {mixerOpen && (
+              <>
+                <button
+                  className="metronome-toggle"
+                  aria-label="Starting pitches"
+                  title="Play starting pitches before each start"
+                  aria-pressed={settings.initialPitches !== false}
+                  onClick={onInitialPitches}
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M7 3v7a5 5 0 0 0 10 0V3M10 3v7a2 2 0 0 0 4 0V3M12 15v6M9 21h6" />
+                  </svg>
+                </button>
+                <button
+                  className="metronome-toggle"
+                  aria-label="Metronome"
+                  title="Beat clicks (accent the first beat of each bar)"
+                  aria-pressed={!!settings.metronome}
+                  onClick={onMetronome}
+                >
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M9 3h6l5 18H4zM12 17l5-11M14 9l4 2M8 17h8" />
+                  </svg>
+                </button>
+                <span
+                  className="mixer-tempo"
+                  role="group"
+                  aria-label="Playback tempo"
+                >
+                  <button
+                    disabled={passageDisabled || settings.speed <= 0.25}
+                    aria-label="Decrease tempo"
+                    title="Decrease tempo by 1 BPM"
+                    onClick={() =>
+                      onSpeed(Math.max(0.25, (bpm - 1) / baseTempo))
+                    }
+                  >
+                    −
+                  </button>
+                  <output aria-label="Tempo in BPM" title="Playback tempo">
+                    {bpm} <small>BPM</small>
+                  </output>
+                  <button
+                    disabled={passageDisabled || settings.speed >= 2}
+                    aria-label="Increase tempo"
+                    title="Increase tempo by 1 BPM"
+                    onClick={() => onSpeed(Math.min(2, (bpm + 1) / baseTempo))}
+                  >
+                    +
+                  </button>
+                </span>
+              </>
+            )}
           </span>
           {range && (
             <div
@@ -487,16 +671,16 @@ export function Score({
                   data-edge={edge}
                   className={"passage-handle " + edge}
                   role="slider"
-                  tabIndex={controlsDisabled ? -1 : 0}
+                  tabIndex={passageDisabled ? -1 : 0}
                   aria-label={
                     edge === "start" ? "Passage start bar" : "Passage end bar"
                   }
                   aria-valuemin={1}
                   aria-valuemax={piece.bars.length}
                   aria-valuenow={(edge === "start" ? range.from : range.to) + 1}
-                  aria-disabled={controlsDisabled}
+                  aria-disabled={passageDisabled}
                   onKeyDown={(e) => {
-                    if (controlsDisabled) return;
+                    if (passageDisabled) return;
                     const delta =
                       e.key === "ArrowLeft"
                         ? -1
@@ -539,13 +723,14 @@ export function Score({
               }}
             >
               {" "}
-              {first + i + 1} · {piece.bars[first + i].meter.join("/")}
+              {first + i + 1}
             </span>
           ))}
         </div>
         {cells.map(({ part, bars, lyrics }) => (
           <section
             key={part.id}
+            data-part={part.id}
             className={
               part.id === settings.part
                 ? "part-group target-group"
@@ -561,48 +746,7 @@ export function Score({
                 style={{ height: lyrics.height }}
               >
                 <div className="staff-label" style={{ width: labelWidth }}>
-                  <div className="staff-mixer">
-                    {partChoice(part)}
-                    <button
-                      className="staff-collapse"
-                      aria-label={`Collapse ${part.name} staff`}
-                      aria-expanded="true"
-                      onClick={() => onMix(part.id, { visible: false })}
-                    >
-                      <span aria-hidden="true">▾</span> {part.name}
-                    </button>
-                    <div className="staff-mix-controls">
-                      <button
-                        className="staff-mute"
-                        aria-label={`Mute ${part.name}`}
-                        title={`Mute ${part.name}`}
-                        aria-pressed={settings.mix[part.id]?.mute || false}
-                        onClick={() =>
-                          onMix(part.id, { mute: !settings.mix[part.id]?.mute })
-                        }
-                      >
-                        <svg
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          aria-hidden="true"
-                        >
-                          <path d="M3 9h4l5-4v14l-5-4H3z" />
-                          {settings.mix[part.id]?.mute ? (
-                            <path d="m16 9 6 6m0-6-6 6" />
-                          ) : (
-                            <path d="M16 8q5 4 0 8" />
-                          )}
-                        </svg>
-                      </button>
-                      <VolumeKnob
-                        name={part.name}
-                        value={settings.mix[part.id]?.volume ?? 0.6}
-                        onChange={(volume) => onMix(part.id, { volume })}
-                      />
-                    </div>
-                  </div>
+                  {partControls(part)}
                   <div
                     aria-hidden="true"
                     dangerouslySetInnerHTML={{
@@ -666,6 +810,9 @@ export function Score({
                         notes={part.notes}
                         results={part.id === feedbackPart ? results : noResults}
                         disabled={controlsDisabled}
+                        seekDisabled={passageDisabled}
+                        barStart={piece.bars[cell.index].start}
+                        onSeek={onSeek}
                         onNote={onNote}
                       />
                       {lyrics.verses.length > 0 && (
@@ -680,6 +827,26 @@ export function Score({
                           viewBox={`0 0 ${cellWidth} ${lyrics.verses.length * 20}`}
                           aria-label={`Lyrics for ${part.name}, bar ${cell.index + 1}`}
                         >
+                          {lyrics.verses.length > 1 &&
+                            lyrics.verses.map(
+                              (verse, row) =>
+                                verse ===
+                                  highlightedVerse(
+                                    lyrics,
+                                    piece.bars[cell.index],
+                                    verseChoices[part.id],
+                                  ) && (
+                                  <rect
+                                    key={verse}
+                                    className="active-verse-background"
+                                    x={0}
+                                    y={row * 20}
+                                    width={cellWidth}
+                                    height={20}
+                                    rx={3}
+                                  />
+                                ),
+                            )}
                           {lyrics.lines.map((line, row) =>
                             line.map((l, i) => {
                               const b = piece.bars[cell.index];
@@ -779,11 +946,38 @@ export function Score({
                       height: lyrics.height - 100,
                       paddingTop: lyrics.top - 100,
                     }}
-                    aria-hidden="true"
+                    aria-label={`Verse highlighting for ${part.name}`}
                   >
                     {lyrics.verses.map((v) => (
                       <div key={v}>
-                        {lyrics.verses.length > 1 ? v + "." : ""}
+                        {lyrics.verses.length > 1 && (
+                          <button
+                            className="verse-choice"
+                            aria-label={`Highlight verse ${v} for ${part.name}`}
+                            aria-pressed={verseChoices[part.id] === v}
+                            data-active={
+                              highlightedVerse(
+                                lyrics,
+                                piece.bars[bar],
+                                verseChoices[part.id],
+                              ) === v
+                            }
+                            title={
+                              verseChoices[part.id] === v
+                                ? "Return to automatic verse highlighting"
+                                : `Highlight verse ${v} (click again for automatic)`
+                            }
+                            onClick={() =>
+                              setVerseChoices((current) => ({
+                                ...current,
+                                [part.id]:
+                                  current[part.id] === v ? undefined : v,
+                              }))
+                            }
+                          >
+                            {v}.
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -795,15 +989,7 @@ export function Score({
                   className="collapsed-staff-label"
                   style={{ width: labelWidth }}
                 >
-                  {partChoice(part)}
-                  <button
-                    className="staff-collapse"
-                    aria-label={`Expand ${part.name} staff`}
-                    aria-expanded="false"
-                    onClick={() => onMix(part.id, { visible: true })}
-                  >
-                    <span aria-hidden="true">▸</span> {part.name}
-                  </button>
+                  {partControls(part)}
                 </div>
               </div>
             )}
@@ -880,9 +1066,7 @@ function PitchView({
           <span aria-hidden="true">{expanded ? "▾" : "▸"}</span> Pitch path ·{" "}
           {part.name}
         </strong>
-        <span className="muted">
-          {expanded ? "Target blocks / your voice line" : "Show pitch path"}
-        </span>
+        {!expanded && <span className="muted">Show pitch path</span>}
       </button>
       {expanded && (
         <div

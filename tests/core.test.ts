@@ -19,6 +19,7 @@ describe("MIDI and tempo maps", () => {
     expect(p.parts[11].name).toBe("Bass 3");
     expect(p.bars).toHaveLength(8);
     expect(Object.keys(defaults(p).mix)).toHaveLength(12);
+    expect(defaults(p).part).toBe("");
   });
   it("handles changing tempo in both directions, including a note crossing a tempo event", () => {
     const m = new Midi();

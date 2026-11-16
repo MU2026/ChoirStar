@@ -1,4 +1,4 @@
-import type { Part } from "./model";
+import type { Bar, Part } from "./model";
 import { midiToNote } from "./vendor/openvox/core/music/notes";
 import { staffYForEvent } from "./vendor/openvox/core/music/scoreModel";
 
@@ -18,9 +18,14 @@ export function lyricLayout(part: Part) {
         max,
         staffYForEvent(
           {
-            ...midiToNote(n.midi),
-            ...n.spelling,
-            midi: n.midi,
+            ...midiToNote(n.midi - (part.clefOctaveChange ?? 0) * 12),
+            ...(n.spelling
+              ? {
+                  ...n.spelling,
+                  octave: n.spelling.octave - (part.clefOctaveChange ?? 0),
+                }
+              : {}),
+            midi: n.midi - (part.clefOctaveChange ?? 0) * 12,
             id: n.id,
             start: 0,
             duration: 1,
@@ -65,4 +70,21 @@ export function lyricLayout(part: Part) {
       return segments;
     }),
   };
+}
+
+/** Repeated source bars advance verses; a manual choice overrides the heuristic. */
+export function highlightedVerse(
+  layout: ReturnType<typeof lyricLayout>,
+  bar: Bar,
+  manual?: string,
+) {
+  if (manual && layout.verses.includes(manual)) return manual;
+  const desired = Math.min((bar.lyricPass ?? 1) - 1, layout.verses.length - 1);
+  const present = (row: number) =>
+    layout.lines[row]?.some((l) => l.tick < bar.end && l.end > bar.start);
+  // Introductory lines may contain words for just one verse.
+  const row = present(desired)
+    ? desired
+    : layout.lines.findIndex((_, i) => present(i));
+  return row < 0 ? undefined : layout.verses[row];
 }

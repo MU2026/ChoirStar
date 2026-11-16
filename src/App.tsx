@@ -1,3 +1,7 @@
+import { measureLatency } from "./latency-audio";
+import type { LatencyResult } from "./latency";
+import { playbackEndTick } from "./rehearsal";
+import { TransportIcon } from "./TransportIcon";
 import { WebsiteImportDialog } from "./WebsiteImportDialog";
 import { PieceLibrary } from "./PieceLibrary";
 import { libraryLayout } from "./piece-library";
@@ -5,8 +9,8 @@ import type { WebsiteCatalogue, WebsiteEntry } from "./website";
 import { ensurePracticeProfile } from "./profiles";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AudioSession, type Frame } from "./audio";
+import { MenuBranch, MenuItem, navigateMenu } from "./SettingsMenu";
 import { INSTRUMENTS, type Instrument } from "./instruments";
-import { SpeedControl } from "./SpeedControl";
 import {
   completedFeedback,
   feedbackDelaySeconds,
@@ -39,42 +43,7 @@ const initial: Library = {
   settings: {},
   attempts: [],
 };
-function TransportIcon({
-  kind,
-}: {
-  kind: "sing" | "listen" | "stop" | "loop";
-}) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      aria-hidden="true"
-    >
-      {kind === "sing" ? (
-        <>
-          <circle cx="9" cy="6" r="3" />
-          <path d="M3 21v-3a6 6 0 0 1 12 0v3M11 7h2M18 5v8M18 5l4-1v7" />
-          <ellipse cx="16.5" cy="14" rx="1.5" ry="1" />
-          <ellipse cx="20.5" cy="12" rx="1.5" ry="1" />
-        </>
-      ) : kind === "listen" ? (
-        <path d="m7 3 14 9-14 9z" fill="currentColor" />
-      ) : kind === "stop" ? (
-        <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" />
-      ) : (
-        <>
-          <path d="M19 7H6a3 3 0 0 0-3 3v2M5 17h13a3 3 0 0 0 3-3v-2M16 4l3 3-3 3M8 14l-3 3 3 3" />
-        </>
-      )}
-    </svg>
-  );
-}
-function SettingsIcon({ kind }: { kind: "audio" | "close" }) {
+function SettingsIcon() {
   return (
     <svg
       width="23"
@@ -86,14 +55,7 @@ function SettingsIcon({ kind }: { kind: "audio" | "close" }) {
       strokeLinecap="round"
       aria-hidden="true"
     >
-      {kind === "audio" ? (
-        <>
-          <rect x="9" y="2" width="6" height="12" rx="3" />
-          <path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" />
-        </>
-      ) : (
-        <path d="m6 6 12 12M18 6 6 18" />
-      )}
+      <path d="M4 6h16M4 12h16M4 18h16" />
     </svg>
   );
 }
@@ -117,11 +79,10 @@ export default function App() {
     [time, setTime] = useState(0),
     [frame, setFrame] = useState<Frame | null>(null),
     [samples, setSamples] = useState<Sample[]>([]),
-    [drawer, setDrawer] = useState<"audio" | null>(null),
+    [drawer, setDrawer] = useState<"audio" | "library" | null>(null),
     [last, setLast] = useState<Attempt | null>(null),
     [recordingURL, setRecordingURL] = useState(""),
     [recordingType, setRecordingType] = useState(""),
-    [includeAudio, setIncludeAudio] = useState(false),
     [showWebsites, setShowWebsites] = useState(false);
   const [noteResults, setNoteResults] = useState<NoteResult[]>([]);
   const [scoreZoom, setScoreZoom] = useState(1);
@@ -133,6 +94,8 @@ export default function App() {
   const reloadTarget = useRef<string | null>(null);
   const reloadFile = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<NoteResult[]>([]);
+  const assessmentStart = useRef(0);
+  const captureEpoch = useRef(-Infinity);
   const feedbackPart = useRef("");
   function clearFeedback() {
     resultsRef.current = [];
@@ -151,30 +114,13 @@ export default function App() {
       cfg.s,
       until,
       resultsRef.current,
+      assessmentStart.current,
     );
     if (next !== resultsRef.current) {
       resultsRef.current = next;
       setNoteResults(next);
     }
   }
-  const importMenu = useRef<HTMLDetailsElement>(null);
-  useEffect(() => {
-    const dismiss = (event: PointerEvent | KeyboardEvent) => {
-      const menu = importMenu.current;
-      if (!menu?.open) return;
-      if (event instanceof KeyboardEvent) {
-        if (event.key !== "Escape") return;
-        menu.open = false;
-        menu.querySelector("summary")?.focus();
-      } else if (!menu.contains(event.target as Node)) menu.open = false;
-    };
-    document.addEventListener("pointerdown", dismiss);
-    document.addEventListener("keydown", dismiss);
-    return () => {
-      document.removeEventListener("pointerdown", dismiss);
-      document.removeEventListener("keydown", dismiss);
-    };
-  }, []);
   const layout = useMemo(
     () => libraryLayout(lib),
     [lib.pieces, lib.websites, lib.layout],
@@ -185,18 +131,52 @@ export default function App() {
   useEffect(() => {
     engine.current.setMonitoring(monitor, monitorVolume);
   }, [monitor, monitorVolume]);
-  const playbackPosition = useCallback(() => engine.current.position(), []);
+  const playbackPosition = useCallback(
+    () => Math.max(engine.current.startSeconds, engine.current.position()),
+    [],
+  );
+  const microphoneDialog = useRef<HTMLDialogElement>(null);
+  const latencyDialog = useRef<HTMLDialogElement>(null);
+  const latencyAbort = useRef<AbortController | null>(null);
+  const latencySetup = useRef<{
+    key: string;
+    device: string;
+    channel: number;
+  } | null>(null);
+  const [measuringLatency, setMeasuringLatency] = useState(false);
+  const [latencyProgress, setLatencyProgress] = useState(0);
+  const [latencyError, setLatencyError] = useState("");
+  const [latencyResult, setLatencyResult] = useState<LatencyResult | null>(
+    null,
+  );
+  const settingsPanel = useRef<HTMLElement>(null);
+  const [inputBusy, setInputBusy] = useState(false);
+  const [inputError, setInputError] = useState("");
   const settingsTrigger = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     if (!drawer) return;
+    settingsPanel.current
+      ?.querySelector<HTMLElement>('[role="menuitem"]')
+      ?.focus();
     const dismiss = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setDrawer(null);
         settingsTrigger.current?.focus();
       }
     };
+    const outside = (event: PointerEvent) => {
+      if (
+        !settingsPanel.current?.contains(event.target as Node) &&
+        !settingsTrigger.current?.contains(event.target as Node)
+      )
+        setDrawer(null);
+    };
     window.addEventListener("keydown", dismiss);
-    return () => window.removeEventListener("keydown", dismiss);
+    window.addEventListener("pointerdown", outside);
+    return () => {
+      window.removeEventListener("keydown", dismiss);
+      window.removeEventListener("pointerdown", outside);
+    };
   }, [drawer]);
   const active = useRef(false);
   const finishing = useRef(false);
@@ -214,7 +194,12 @@ export default function App() {
   const writes = useRef(Promise.resolve());
   const piece = lib.pieces.find((p) => p.id === pieceId);
   const key = `${profile}:${pieceId}`;
-  const settings = piece ? lib.settings[key] || defaults(piece) : null;
+  const savedSettings = piece ? lib.settings[key] || defaults(piece) : null;
+  // Older settings cannot distinguish a deliberate choice from the old default.
+  const settings = savedSettings && {
+    ...savedSettings,
+    part: savedSettings.partSelectionConfirmed ? savedSettings.part : "",
+  };
   function update(next: Library) {
     libRef.current = next;
     setLib(next);
@@ -229,7 +214,13 @@ export default function App() {
       ...libRef.current,
       settings: {
         ...libRef.current.settings,
-        [key]: { ...settings, ...patch },
+        [key]: {
+          ...settings,
+          ...patch,
+          ...(patch.part !== undefined
+            ? { partSelectionConfirmed: !!patch.part }
+            : {}),
+        },
       },
     });
   }
@@ -250,14 +241,17 @@ export default function App() {
       });
     return () => {
       active.current = false;
+      latencyAbort.current?.abort();
       void engine.current.close();
     };
   }, []);
   useEffect(() => {
     const changed = () => {
-      void navigator.mediaDevices
-        .enumerateDevices()
-        .then((d) => setDevices(d.filter((d) => d.kind === "audioinput")));
+      latencyAbort.current?.abort();
+      setLatencyResult(null);
+      void refreshDevices().catch((e) =>
+        setInputError("Could not refresh microphones: " + message(e)),
+      );
       if (engine.current.running) {
         void stop();
         setError(
@@ -288,7 +282,7 @@ export default function App() {
   useEffect(() => {
     if (!running) return;
     const id = window.setInterval(() => {
-      setTime(engine.current.position());
+      setTime(Math.max(engine.current.startSeconds, engine.current.position()));
       const cfg = startConfig.current;
       if (cfg)
         refreshFeedback(
@@ -385,22 +379,101 @@ export default function App() {
     }
     await reloadFromFile(f, id);
   }
+  async function refreshDevices() {
+    const inputs = (await navigator.mediaDevices.enumerateDevices()).filter(
+      (d) => d.kind === "audioinput" && d.deviceId,
+    );
+    setDevices(inputs);
+    return inputs;
+  }
+  useEffect(() => {
+    if (screen === "practice") void refreshDevices().catch(() => {});
+  }, [screen]);
   async function inputAccess() {
+    setInputBusy(true);
+    setInputError("");
     try {
-      setError("");
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((t) => t.stop());
-      setDevices(
-        (await navigator.mediaDevices.enumerateDevices()).filter(
-          (d) => d.kind === "audioinput",
-        ),
-      );
-      setNotice("Input list refreshed. The microphone is now off.");
+      await refreshDevices();
     } catch (e) {
-      setError("Microphone access: " + message(e));
+      setInputError("Microphone access: " + message(e));
+    } finally {
+      setInputBusy(false);
     }
   }
+  function cancelLatency() {
+    latencyAbort.current?.abort();
+    latencyAbort.current = null;
+    setMeasuringLatency(false);
+    latencyDialog.current?.close();
+  }
+  async function runLatencyMeasurement() {
+    if (
+      !settings ||
+      running ||
+      starting ||
+      measuringLatency ||
+      settings.speakers
+    )
+      return;
+    const controller = new AbortController();
+    latencyAbort.current = controller;
+    latencySetup.current = {
+      key,
+      device: settings.device,
+      channel: settings.channel,
+    };
+    setLatencyError("");
+    setLatencyResult(null);
+    setLatencyProgress(0);
+    setMeasuringLatency(true);
+    change({ timing: false });
+    try {
+      const ctx = await engine.current.ready();
+      const result = await measureLatency(
+        settings.device,
+        settings.channel,
+        controller.signal,
+        setLatencyProgress,
+        ctx,
+      );
+      if (!controller.signal.aborted && latencyAbort.current === controller)
+        setLatencyResult(result);
+    } catch (error) {
+      if (!controller.signal.aborted) setLatencyError(message(error));
+    } finally {
+      if (latencyAbort.current === controller) {
+        latencyAbort.current = null;
+        setMeasuringLatency(false);
+      }
+    }
+  }
+  function applyLatency() {
+    const setup = latencySetup.current;
+    if (
+      !settings ||
+      !latencyResult ||
+      !setup ||
+      setup.key !== key ||
+      setup.device !== settings.device ||
+      setup.channel !== settings.channel ||
+      settings.speakers
+    ) {
+      setLatencyResult(null);
+      setLatencyError(
+        "The audio setup changed. Measure again before applying a correction.",
+      );
+      return;
+    }
+    change({ offset: latencyResult.offsetMs, timing: true });
+    setNotice(
+      `Timing compensation set to ${latencyResult.offsetMs} ms. Re-measure after changing your microphone or headphones.`,
+    );
+    cancelLatency();
+  }
   function frameReceived(f: Frame) {
+    if (f.time < captureEpoch.current) return;
     setFrame(f);
     const cfg = startConfig.current;
     if (
@@ -431,10 +504,23 @@ export default function App() {
     const p = loopConfig?.p || piece,
       s = loopConfig?.s || settings;
     if (!p || !s) return;
+    if (
+      practice &&
+      !loopConfig &&
+      (!p.parts.some((part) => part.id === s.part) ||
+        !s.device ||
+        s.device === "off")
+    ) {
+      setInputError("");
+      setDrawer(null);
+      microphoneDialog.current?.showModal();
+      return;
+    }
     setStarting(true);
     setError("");
     setNotice("");
     sampleRef.current = [];
+    captureEpoch.current = -Infinity;
     clearFeedback();
     setSamples([]);
     setFrame(null);
@@ -447,8 +533,16 @@ export default function App() {
     };
     startConfig.current = cfg;
     active.current = true;
+    let microphoneReady = !practice;
     try {
       if (practice) {
+        if (!loopConfig) {
+          const available = await refreshDevices();
+          if (!available.some((d) => d.deviceId === s.device))
+            throw new Error(
+              "The selected microphone is unavailable. Choose an available device.",
+            );
+        }
         const input = await engine.current.microphone(
           s.device,
           s.channel,
@@ -475,7 +569,16 @@ export default function App() {
           }),
         );
       }
-      await engine.current.play(p, s, () => void finish(true));
+      microphoneReady = true;
+      const cursor = loopConfig
+        ? p.bars[s.from].start
+        : tickAt(p, Math.max(0, time));
+      const startTick = cursor >= p.end - 1e-6 ? p.bars[s.from].start : cursor;
+      const endTick = playbackEndTick(p, s, startTick);
+      cfg.s.from = barAt(p, startTick + 1e-6);
+      cfg.s.to = barAt(p, endTick - 0.001);
+      assessmentStart.current = secondsAt(p, startTick);
+      await engine.current.play(p, cfg.s, () => void finish(true), startTick);
       if (!active.current) {
         engine.current.stopPlayback();
         engine.current.releaseMic();
@@ -484,13 +587,16 @@ export default function App() {
       setScreen("practice");
       setDrawer(null);
       setRunning(true);
-      setTime(engine.current.position());
+      setTime(Math.max(engine.current.startSeconds, engine.current.position()));
     } catch (e) {
       active.current = false;
       await engine.current.finishRecording();
       engine.current.stopPlayback();
       engine.current.releaseMic();
-      setError(message(e));
+      if (!microphoneReady) {
+        setInputError(message(e));
+        microphoneDialog.current?.showModal();
+      } else setError(message(e));
       setRunning(false);
     } finally {
       setStarting(false);
@@ -550,6 +656,7 @@ export default function App() {
             cfg.s,
             Math.min(stoppedAt, engine.current.endSeconds),
             resultsRef.current,
+            assessmentStart.current,
           ),
           recording,
           audioSettings: {
@@ -569,9 +676,20 @@ export default function App() {
         feedbackPart.current = attempt.part;
         setNoteResults(attempt.results);
         setSamples([...sampleRef.current]);
-        setTime(Math.min(stoppedAt, engine.current.endSeconds));
+        setTime(
+          Math.max(
+            engine.current.startSeconds,
+            Math.min(stoppedAt, engine.current.endSeconds),
+          ),
+        );
         setScreen("practice");
-      } else if (cfg) setTime(secondsAt(cfg.p, cfg.p.bars[cfg.s.from].start));
+      } else if (cfg)
+        setTime(
+          Math.max(
+            engine.current.startSeconds,
+            Math.min(stoppedAt, engine.current.endSeconds),
+          ),
+        );
     } catch (e) {
       setError("Could not finish attempt: " + message(e));
     } finally {
@@ -580,10 +698,19 @@ export default function App() {
       finishing.current = false;
       setStarting(false);
     }
-    if (natural && cfg?.s.loop) {
+    const nextSettings =
+      cfg && libRef.current.settings[`${cfg.profile}:${cfg.p.id}`];
+    if (natural && cfg?.s.loop && nextSettings?.loop) {
       setScreen("practice");
       setTimeout(() => {
-        if (startConfig.current === cfg) void start(cfg.practice, cfg);
+        if (startConfig.current === cfg && cfg.s.loop)
+          void start(cfg.practice, {
+            ...cfg,
+            s: {
+              ...structuredClone(nextSettings),
+              timing: nextSettings.speakers ? false : nextSettings.timing,
+            },
+          });
       }, 0);
     }
   }
@@ -668,8 +795,72 @@ export default function App() {
     const m = { ...settings.mix[id], ...patch };
     change({ mix: { ...settings.mix, [id]: m } });
     if (running) {
-      engine.current.mix(id, m.volume, m.mute);
-      if (startConfig.current) startConfig.current.s.mix[id] = m;
+      const nextMix = { ...settings.mix, [id]: m };
+      engine.current.setMix(nextMix);
+      if (startConfig.current) startConfig.current.s.mix = nextMix;
+    }
+  }
+  function selectPassage(range: { from: number; to: number } | null) {
+    if (!piece || !settings) return;
+    const patch = {
+      from: range?.from ?? 0,
+      to: range?.to ?? piece.bars.length - 1,
+      loop: !!range,
+    };
+    change(patch);
+    if (running && startConfig.current) {
+      engine.current.setPassageEnd(piece, patch.to);
+      // Keep this round's real start for assessment. The next iteration uses
+      // the newly selected start, without moving the current playback clock.
+      startConfig.current.s.to = Math.max(
+        startConfig.current.s.from,
+        barAt(piece, tickAt(piece, engine.current.endSeconds) - 0.001),
+      );
+      startConfig.current.s.loop = patch.loop;
+    } else if (range) setTime(secondsAt(piece, piece.bars[range.from].start));
+  }
+  function changeSpeed(speed: number) {
+    if (
+      !settings ||
+      !piece ||
+      starting ||
+      finishing.current ||
+      speed === settings.speed
+    )
+      return;
+    change({ speed });
+    if (running && startConfig.current) {
+      engine.current.setSpeed(speed);
+      const position = Math.max(
+        engine.current.startSeconds,
+        engine.current.position(),
+      );
+      captureEpoch.current = engine.current.context!.currentTime;
+      assessmentStart.current = position;
+      startConfig.current.s.speed = speed;
+      startConfig.current.s.from = barAt(piece, tickAt(piece, position));
+      sampleRef.current = [];
+      setSamples([]);
+      clearFeedback();
+      setFrame(null);
+      setTime(position);
+    }
+  }
+  function seekScore(tick: number) {
+    if (!piece || !settings || starting || finishing.current) return;
+    const target = Math.max(0, Math.min(piece.end - 0.001, tick));
+    setTime(secondsAt(piece, target));
+    if (running && startConfig.current) {
+      const endTick = playbackEndTick(piece, settings, target);
+      engine.current.seek(target, endTick);
+      captureEpoch.current = engine.current.context!.currentTime;
+      assessmentStart.current = secondsAt(piece, target);
+      startConfig.current.s.from = barAt(piece, target + 1e-6);
+      startConfig.current.s.to = barAt(piece, endTick - 0.001);
+      sampleRef.current = [];
+      setSamples([]);
+      clearFeedback();
+      setFrame(null);
     }
   }
   async function recordingAction(a: Attempt, download = false) {
@@ -724,189 +915,390 @@ export default function App() {
     target
       ? Math.round((frame.midi - target.midi) * 100)
       : null;
-  const viewTime =
-    piece && settings
-      ? Math.max(time, secondsAt(piece, piece.bars[settings.from].start))
-      : time;
-  const disabled = running || starting;
-  const audioPanel = piece && settings && (
+  const viewTime = time;
+  const disabled = running || starting || measuringLatency;
+  const devicePicker = settings && (
     <>
-      {disabled && (
-        <p className="muted">Stop the practice to change audio settings.</p>
-      )}
-      <fieldset disabled={disabled} className="audio-controls">
-        <label className="field">
-          Playback instrument
-          <select
-            value={settings.instrument ?? "piano"}
-            onChange={(e) =>
-              change({ instrument: e.target.value as Instrument })
-            }
-          >
-            {INSTRUMENTS.map((instrument) => (
-              <option key={instrument.id} value={instrument.id}>
-                {instrument.name}
+      <label className="field">
+        Device
+        <select
+          aria-label="Recording device"
+          value={settings.device || "off"}
+          disabled={disabled || inputBusy}
+          onChange={(e) => change({ device: e.target.value, timing: false })}
+        >
+          <option value="off">Off</option>
+          {settings.device &&
+            settings.device !== "off" &&
+            !devices.some((d) => d.deviceId === settings.device) && (
+              <option value={settings.device} disabled>
+                Selected microphone unavailable
               </option>
-            ))}
-          </select>
-          <small className="muted">
-            Synthesized sounds for all parts and starting notes. Choir, organ
-            and strings sustain long notes.
-          </small>
-        </label>
-        <label className="field">
-          Listening setup
-          <select
-            value={settings.speakers ? "speakers" : "headphones"}
-            onChange={(e) => {
-              const speakers = e.target.value === "speakers";
-              setMonitor(false);
-              change({
-                speakers,
-                channel: speakers ? 0 : settings.channel,
-                timing: false,
-              });
+            )}
+          {devices.map((d, i) => (
+            <option key={d.deviceId} value={d.deviceId}>
+              {d.label || `Microphone ${i + 1}`}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button
+        disabled={disabled || inputBusy}
+        onClick={() => void inputAccess()}
+      >
+        {inputBusy ? "Checking microphones…" : "Allow access / refresh devices"}
+      </button>
+      {inputError && <p role="alert">{inputError}</p>}
+      <small className="muted">
+        Access reveals available microphones. Capture runs only during a singing
+        round or a latency test and stops when it ends.
+      </small>
+    </>
+  );
+  const audioPanel = piece && settings && (
+    <div role="menu" aria-label="Practice settings" onKeyDown={navigateMenu}>
+      <MenuBranch label="Playback">
+        <MenuBranch label="Instrument">
+          {INSTRUMENTS.map((instrument) => (
+            <MenuItem
+              key={instrument.id}
+              radio
+              checked={(settings.instrument ?? "piano") === instrument.id}
+              disabled={disabled}
+              onClick={() => {
+                change({ instrument: instrument.id as Instrument });
+                closeSettings();
+              }}
+            >
+              {instrument.name}
+            </MenuItem>
+          ))}
+        </MenuBranch>
+        <MenuItem
+          checked={!!settings.speakers}
+          disabled={disabled}
+          title="Enable when using speakers. Keep playback quiet."
+          onClick={() => {
+            setMonitor(false);
+            change({
+              speakers: !settings.speakers,
+              channel: !settings.speakers ? 0 : settings.channel,
+              timing: false,
+            });
+            closeSettings();
+          }}
+        >
+          Echo reduction <span className="menu-hint">for speakers</span>
+        </MenuItem>
+        <MenuBranch label="Hear my voice">
+          <MenuItem
+            checked={!monitor || !!settings.speakers}
+            disabled={!!settings.speakers}
+            onClick={() => setMonitor(!monitor)}
+          >
+            Mute
+          </MenuItem>
+          <label className="menu-slider">
+            Voice level <output>{Math.round(monitorVolume * 100)}%</output>
+            <input
+              aria-label="Voice monitoring volume"
+              type="range"
+              min="0"
+              max="100"
+              disabled={!!settings.speakers}
+              value={monitorVolume * 100}
+              onChange={(e) => setMonitorVolume(Number(e.target.value) / 100)}
+            />
+          </label>
+          <p className="menu-note">
+            {settings.speakers
+              ? "Off with echo reduction."
+              : "Headphones only · may add delay"}
+          </p>
+        </MenuBranch>
+      </MenuBranch>
+      <MenuBranch label="Recording">
+        <MenuBranch label="Device">
+          <MenuItem
+            radio
+            checked={!settings.device || settings.device === "off"}
+            disabled={disabled || inputBusy}
+            onClick={() => {
+              change({ device: "off", timing: false });
+              closeSettings();
             }}
           >
-            <option value="headphones">
-              Headphones · unprocessed microphone
-            </option>
-            <option value="speakers">Laptop speakers · echo reduction</option>
-          </select>
-        </label>
-        {settings.speakers && (
-          <p className="muted">
-            Experimental speaker mode requests echo reduction and rejects
-            unstable pitch. Keep speaker volume low. Hear my voice is disabled
-            to avoid feeding the microphone back into the speakers. New pitches
-            need two consistent observations (normally about 20 ms apart); onset
-            assessment should stay off.
-          </p>
-        )}
-        <div className="row">
-          <button onClick={() => void inputAccess()}>
-            Choose microphone access
-          </button>
-          <span className="muted">
-            {running && engine.current.stream
-              ? "Microphone active"
-              : "Microphone off"}
-          </span>
-        </div>
-        <label className="field">
-          Microphone
-          <select
-            value={settings.device}
-            onChange={(e) => change({ device: e.target.value, timing: false })}
+            Off
+          </MenuItem>
+          {devices.map((d, i) => (
+            <MenuItem
+              key={d.deviceId}
+              radio
+              checked={settings.device === d.deviceId}
+              disabled={disabled || inputBusy}
+              onClick={() => {
+                change({ device: d.deviceId, timing: false });
+                closeSettings();
+              }}
+            >
+              {d.label || `Microphone ${i + 1}`}
+            </MenuItem>
+          ))}
+          {settings.device &&
+            settings.device !== "off" &&
+            !devices.some((d) => d.deviceId === settings.device) && (
+              <MenuItem checked disabled onClick={() => {}}>
+                Selected microphone unavailable
+              </MenuItem>
+            )}
+          <div role="separator" className="menu-separator" />
+          <MenuItem
+            disabled={disabled || inputBusy}
+            onClick={() => void inputAccess()}
           >
-            <option value="">System default input</option>
-            {devices.map((d) => (
-              <option key={d.deviceId} value={d.deviceId}>
-                {d.label || "Microphone"}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          Input channel
-          <select
-            value={settings.channel}
-            disabled={!!settings.speakers}
-            onChange={(e) =>
-              change({
-                channel: Number(e.target.value),
-                timing: false,
-              })
-            }
+            {inputBusy
+              ? "Checking microphones…"
+              : "Allow access / refresh devices…"}
+          </MenuItem>
+          {inputError && (
+            <p role="alert" className="menu-note">
+              {inputError}
+            </p>
+          )}
+        </MenuBranch>
+        <MenuItem
+          checked={record}
+          disabled={disabled}
+          title="Save the voice recording locally with this round."
+          onClick={() => {
+            setRecord(!record);
+            closeSettings();
+          }}
+        >
+          Save a recording
+        </MenuItem>
+        <div role="separator" className="menu-separator" />
+        <MenuBranch label="Input and timing">
+          <MenuBranch label="Input channel">
+            {["Input 1 / mono", "Input 2 (audio interface)"].map(
+              (label, channel) => (
+                <MenuItem
+                  key={channel}
+                  radio
+                  checked={settings.channel === channel}
+                  disabled={disabled || !!settings.speakers}
+                  onClick={() => {
+                    change({ channel, timing: false });
+                    closeSettings();
+                  }}
+                >
+                  {label}
+                </MenuItem>
+              ),
+            )}
+          </MenuBranch>
+          <MenuItem
+            disabled={disabled}
+            onClick={() => {
+              closeSettings();
+              engine.current.stopPlayback();
+              engine.current.releaseMic();
+              setLatencyResult(null);
+              setLatencyError("");
+              latencyDialog.current?.showModal();
+            }}
           >
-            <option value={0}>Input 1 / mono</option>
-            <option value={1}>Input 2 (audio interface)</option>
-          </select>
-        </label>
-        <p className="muted">
-          Select the output in macOS. Headphones isolate the backing mix from
-          the microphone. Volt 2 channel separation and Bluetooth timing need a
-          real-device check.
-        </p>
-        <details>
-          <summary>Timing setup · experimental</summary>
-          <p className="muted">
-            Pitch feedback works without timing assessment. Verify this offset
-            with your current headphones before enabling onset feedback;
-            changing input or output requires another check.
-          </p>
-          <label className="field">
-            Input / output compensation (ms)
+            Measure latency…
+          </MenuItem>
+          <label className="menu-slider">
+            Compensation <output>{settings.offset} ms</output>
             <input
-              type="number"
+              aria-label="Input / output compensation (ms)"
+              type="range"
               min="-1000"
               max="1000"
               step="10"
+              disabled={disabled}
               value={settings.offset}
               onChange={(e) =>
-                change({
-                  offset: Math.max(
-                    -1000,
-                    Math.min(1000, Number(e.target.value)),
-                  ),
-                  timing: false,
-                })
+                change({ offset: Number(e.target.value), timing: false })
               }
             />
           </label>
-          <label>
+          <MenuItem
+            checked={settings.timing && !settings.speakers}
+            disabled={disabled || !!settings.speakers}
+            title="Enable only after checking timing with the current input and output."
+            onClick={() => {
+              change({ timing: !settings.timing });
+              closeSettings();
+            }}
+          >
+            Timing checked for this setup
+          </MenuItem>
+          <p className="menu-note">
+            Experimental · recheck after device changes
+          </p>
+        </MenuBranch>
+      </MenuBranch>
+      <MenuBranch label="View">
+        <MenuItem
+          onClick={() => {
+            closeSettings();
+            if (document.fullscreenElement)
+              void document
+                .exitFullscreen()
+                .catch(() => setError("Could not exit full screen."));
+            else
+              void root.current
+                ?.requestFullscreen()
+                .catch(() =>
+                  setError(
+                    "Full screen is unavailable. Maximize your browser window instead.",
+                  ),
+                );
+          }}
+        >
+          Full screen
+        </MenuItem>
+        <MenuBranch label="Zoom">
+          <label className="menu-slider">
+            Zoom <output>{Math.round(scoreZoom * 100)}%</output>
             <input
-              type="checkbox"
-              checked={settings.timing && !settings.speakers}
-              disabled={!!settings.speakers}
-              onChange={(e) => change({ timing: e.target.checked })}
+              aria-label="View zoom"
+              type="range"
+              min="50"
+              max="200"
+              step="5"
+              value={scoreZoom * 100}
+              onChange={(e) => setScoreZoom(Number(e.target.value) / 100)}
             />
-            I have checked timing with this audio setup
           </label>
-        </details>
-        <label className="field">
-          <span>
-            <input
-              type="checkbox"
-              checked={record}
-              onChange={(e) => setRecord(e.target.checked)}
-            />{" "}
-            Save a voice recording
-          </span>
-        </label>
-        <label title="Use headphones. Browser monitoring may be delayed, especially over Bluetooth.">
+          <MenuItem onClick={() => setScoreZoom(1)}>Reset to 100%</MenuItem>
+        </MenuBranch>
+      </MenuBranch>
+      <MenuBranch label={`Tempo · ${Math.round(settings.speed * 100)}%`}>
+        <label className="menu-slider">
+          Playback speed <output>{Math.round(settings.speed * 100)}%</output>
           <input
-            type="checkbox"
-            checked={monitor && !settings.speakers}
-            disabled={!!settings.speakers}
-            onChange={(e) => setMonitor(e.target.checked)}
-          />
-          Hear my voice
-        </label>
-        <label>
-          Voice level
-          <input
-            aria-label="Voice monitoring volume"
-            disabled={!!settings.speakers}
+            aria-label="Playback speed"
             type="range"
-            min="0"
-            max="100"
-            value={monitorVolume * 100}
-            onChange={(e) => setMonitorVolume(Number(e.target.value) / 100)}
+            min="25"
+            max="200"
+            step="5"
+            value={settings.speed * 100}
+            disabled={starting}
+            onChange={(e) => changeSpeed(Number(e.target.value) / 100)}
           />
         </label>
-      </fieldset>
-      {notice && (
-        <p role="status" className="muted">
-          {notice}
+        <MenuItem disabled={starting} onClick={() => changeSpeed(1)}>
+          Reset to 100%
+        </MenuItem>
+      </MenuBranch>
+      {disabled && (
+        <p className="menu-note">
+          Some playback and recording settings require stopping.
         </p>
       )}
-    </>
+    </div>
   );
   const closeSettings = () => {
     setDrawer(null);
     settingsTrigger.current?.focus();
   };
+  async function exportBackup(recordings: boolean) {
+    closeSettings();
+    try {
+      await writes.current;
+      await store.backup(libRef.current, recordings);
+    } catch (e) {
+      setError("Backup export failed: " + message(e));
+    }
+  }
+  const libraryMenu = (
+    <div role="menu" aria-label="Library menu" onKeyDown={navigateMenu}>
+      <MenuBranch label="Import">
+        <MenuItem
+          disabled={!loaded || reloading}
+          onClick={() => {
+            closeSettings();
+            file.current?.click();
+          }}
+        >
+          Local File
+        </MenuItem>
+        <MenuItem
+          disabled={!loaded || reloading}
+          onClick={() => {
+            closeSettings();
+            setShowWebsites(true);
+          }}
+        >
+          Website
+        </MenuItem>
+      </MenuBranch>
+      <MenuBranch label="Backup">
+        <MenuItem disabled={!loaded} onClick={() => void exportBackup(false)}>
+          Export
+        </MenuItem>
+        <MenuItem disabled={!loaded} onClick={() => void exportBackup(true)}>
+          Export with voice recordings
+        </MenuItem>
+        <MenuItem
+          disabled={!loaded}
+          title="Restore adds copies and preserves existing data."
+          onClick={() => {
+            closeSettings();
+            restoreFile.current?.click();
+          }}
+        >
+          Restore
+        </MenuItem>
+      </MenuBranch>
+      <MenuItem
+        disabled={!loaded}
+        onClick={() => {
+          closeSettings();
+          setScreen("library");
+        }}
+      >
+        View practice history
+      </MenuItem>
+    </div>
+  );
+  const menuButton = (
+    <button
+      className="icon-button"
+      aria-label="Settings"
+      title="Settings"
+      aria-expanded={!!drawer}
+      aria-controls="settings-popup"
+      onClick={(e) => {
+        settingsTrigger.current = e.currentTarget;
+        setDrawer(drawer ? null : screen === "practice" ? "audio" : "library");
+      }}
+    >
+      <SettingsIcon />
+    </button>
+  );
+  const settingsPopup = drawer && (
+    <aside
+      ref={settingsPanel}
+      id="settings-popup"
+      className="drawer settings-popup"
+      role="region"
+      aria-label="Settings"
+      onKeyDown={(e) => {
+        if (e.key === "Tab") closeSettings();
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          closeSettings();
+        }
+      }}
+    >
+      {screen === "practice" ? audioPanel : libraryMenu}
+    </aside>
+  );
   return (
     <div
       ref={root}
@@ -916,54 +1308,30 @@ export default function App() {
     >
       {screen !== "practice" && (
         <header inert={reloading}>
+          <div className="practice-menu-anchor">
+            {menuButton}
+            {settingsPopup}
+          </div>
           <a
             className="brand"
             href="#"
             onClick={(e) => {
               e.preventDefault();
+              setDrawer(null);
               setScreen("prepare");
             }}
           >
             ChoirStar <span>✦</span>
           </a>
           <span className="tag">LOCAL PRACTICE · 0.1</span>
-          <details className="import-menu" ref={importMenu}>
-            <summary>Import</summary>
-            <div className="import-options">
-              <button
-                disabled={!loaded}
-                onClick={() => {
-                  importMenu.current?.removeAttribute("open");
-                  file.current?.click();
-                }}
-              >
-                Local File
-              </button>
-              <button
-                disabled={!loaded}
-                onClick={() => {
-                  importMenu.current?.removeAttribute("open");
-                  setShowWebsites(true);
-                }}
-              >
-                Website
-              </button>
-            </div>
-          </details>
-          <nav>
+          {screen === "library" && (
             <button
-              aria-pressed={screen === "prepare"}
+              className="history-back"
               onClick={() => setScreen("prepare")}
             >
-              Library
+              ← Library
             </button>
-            <button
-              aria-pressed={screen === "library"}
-              onClick={() => setScreen("library")}
-            >
-              History & backup
-            </button>
-          </nav>
+          )}
         </header>
       )}
       {error && (
@@ -1003,6 +1371,30 @@ export default function App() {
           if (f && id) void reloadFromFile(f, id);
         }}
       />
+      <input
+        hidden
+        type="file"
+        accept=".json"
+        ref={restoreFile}
+        onChange={async (e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (!f) return;
+          try {
+            if (f.size > 100 * 1024 * 1024)
+              throw new Error("Backup exceeds the 100 MB limit.");
+            await writes.current;
+            const next = await store.restore(await f.text(), libRef.current);
+            setLib(next);
+            libRef.current = next;
+            setNotice(
+              "Backup restored as new profiles and pieces. Existing data was preserved.",
+            );
+          } catch (e) {
+            setError("Restore failed: " + message(e));
+          }
+        }}
+      />
       {!loaded ? (
         <main>
           <h1>Opening your local library…</h1>
@@ -1010,7 +1402,6 @@ export default function App() {
       ) : screen === "prepare" ? (
         <main className="library-home">
           <section className="piece-choice panel">
-            <h2>Your pieces</h2>
             {reloadFallback && (
               <div className="row notice" role="status">
                 {/^https?:\/\//i.test(reloadFallback.page) && (
@@ -1098,13 +1489,14 @@ export default function App() {
       ) : screen === "practice" && piece && settings ? (
         <>
           <div className="practice-header">
-            <button disabled={disabled} onClick={() => setScreen("prepare")}>
-              ← Library
-            </button>
-            <div>
+            <div className="practice-menu-anchor">
+              {menuButton}
+              {settingsPopup}
+            </div>
+            <div className="practice-title">
               <strong>{piece.title}</strong>
               <div className="muted">
-                {currentPart?.name} · Bar{" "}
+                {currentPart?.name || "No part selected"} · Bar{" "}
                 {Math.min(
                   piece.bars.length,
                   barAt(
@@ -1114,6 +1506,12 @@ export default function App() {
                 )}
               </div>
             </div>
+            {(record || settings.loop) && (
+              <span className="record-status">
+                {record ? "● Recording enabled" : "Direct loop"}
+              </span>
+            )}
+            <ImportWarnings key={piece.id} warnings={piece.importWarnings} />
             <div className="top-transport">
               {running ? (
                 <button
@@ -1146,112 +1544,162 @@ export default function App() {
                   </button>
                 </>
               )}
-              <SpeedControl
-                speed={settings.speed}
-                disabled={disabled}
-                onChange={(speed) => change({ speed })}
-              />
-              <label className="view-zoom">
-                Zoom
-                <select
-                  aria-label="View zoom"
-                  title="Zoom notation and pitch view"
-                  value={scoreZoom}
-                  onChange={(e) => setScoreZoom(Number(e.target.value))}
-                >
-                  {[0.5, 0.75, 0.9, 1, 1.25, 1.5, 1.75, 2].map((zoom) => (
-                    <option key={zoom} value={zoom}>
-                      {Math.round(zoom * 100)}%
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                className="icon-button"
-                disabled={disabled}
-                aria-label="Loop passage"
-                title="Loop passage"
-                aria-pressed={settings.loop}
-                onClick={() => change({ loop: !settings.loop })}
-              >
-                <TransportIcon kind="loop" />
-              </button>
-              <span
-                className="record-status"
-                title={
-                  settings.loop
-                    ? "Loop without starting notes or count-in"
-                    : "All starting notes, then a one-bar count-in"
-                }
-              >
-                {record
-                  ? "● Recording enabled"
-                  : settings.loop
-                    ? "Direct loop"
-                    : "Starting notes + count-in"}
-              </span>
-            </div>
-            <div className="row">
-              <ImportWarnings key={piece.id} warnings={piece.importWarnings} />
-              <button
-                className="icon-button"
-                aria-label="Audio settings"
-                title="Audio settings"
-                aria-expanded={drawer === "audio"}
-                aria-controls="practice-settings"
-                onClick={(e) => {
-                  settingsTrigger.current = e.currentTarget;
-                  setDrawer(drawer === "audio" ? null : "audio");
-                }}
-              >
-                <SettingsIcon kind="audio" />
-              </button>
-              <button
-                onClick={() => {
-                  if (document.fullscreenElement)
-                    void document.exitFullscreen();
-                  else
-                    void root.current
-                      ?.requestFullscreen()
-                      .catch(() =>
-                        setError(
-                          "Full screen is unavailable. Maximize your browser window instead.",
-                        ),
-                      );
-                }}
-              >
-                Full screen
+              <button disabled={disabled} onClick={() => setScreen("prepare")}>
+                ← Library
               </button>
             </div>
           </div>
-          {drawer && (
-            <aside
-              id="practice-settings"
-              className="drawer"
-              role="region"
-              aria-label="Audio settings"
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  e.stopPropagation();
-                  closeSettings();
+
+          <dialog
+            ref={microphoneDialog}
+            className="import-warnings-dialog"
+            aria-labelledby="microphone-title"
+          >
+            <h2 id="microphone-title">Get ready to sing</h2>
+            <p>Choose your part and an available microphone before starting.</p>
+            {!currentPart && (
+              <p role="status">Select the part you want to practise.</p>
+            )}
+            <label>
+              Voice part
+              <select
+                value={settings.part}
+                onChange={(event) => change({ part: event.target.value })}
+              >
+                <option value="">Choose a part…</option>
+                {piece.parts.map((part) => (
+                  <option key={part.id} value={part.id}>
+                    {part.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {devicePicker}
+            <div className="row">
+              <button
+                disabled={
+                  inputBusy ||
+                  !currentPart ||
+                  !settings.device ||
+                  settings.device === "off" ||
+                  !devices.some((d) => d.deviceId === settings.device)
                 }
-              }}
-            >
-              <div className="settings-heading">
-                <h2>Audio settings</h2>
-                <button
-                  autoFocus
-                  className="icon-button"
-                  aria-label="Close settings"
-                  title="Close settings"
-                  onClick={closeSettings}
-                >
-                  <SettingsIcon kind="close" />
-                </button>
+                onClick={() => {
+                  microphoneDialog.current?.close();
+                  void start(true);
+                }}
+              >
+                Start singing
+              </button>
+              <button
+                disabled={inputBusy}
+                onClick={() => {
+                  microphoneDialog.current?.close();
+                  void start(false);
+                }}
+              >
+                Listen without microphone
+              </button>
+              <button onClick={() => microphoneDialog.current?.close()}>
+                Cancel
+              </button>
+            </div>
+          </dialog>
+          <dialog
+            ref={latencyDialog}
+            className="latency-dialog"
+            aria-labelledby="latency-title"
+            onCancel={cancelLatency}
+            onClose={() => {
+              latencyAbort.current?.abort();
+            }}
+          >
+            <h2 id="latency-title">Measure audio delay</h2>
+            <p>
+              Place one headphone earpiece close to the selected microphone.
+              Keep the room quiet and use a comfortable listening volume. Do not
+              sing or tap along.
+            </p>
+            <p>
+              Keep direct monitoring off during this test. Seven short signals
+              measure the delay and then verify the result. This takes about 12
+              seconds.
+            </p>
+            {devicePicker}
+            <p className="menu-note">
+              Input channel {settings.channel + 1}. To change the channel, close
+              this dialog and use Recording → Input and timing.
+            </p>
+            {settings.speakers && (
+              <p role="alert">
+                Use headphones and turn off Echo reduction before measuring
+                timing.
+              </p>
+            )}
+            {measuringLatency && (
+              <div role="status" aria-live="polite">
+                <p>
+                  {latencyProgress < 4
+                    ? "Measuring delay…"
+                    : "Verifying the correction…"}{" "}
+                  {latencyProgress}/7 signals captured.
+                </p>
+                <progress
+                  max="7"
+                  value={latencyProgress}
+                  aria-label="Latency measurement progress"
+                />
               </div>
-              {audioPanel}
-            </aside>
-          )}
+            )}
+            {latencyError && <p role="alert">{latencyError}</p>}
+            {latencyResult && (
+              <div role="status">
+                <p>
+                  <strong>
+                    Suggested correction: {latencyResult.offsetMs} ms
+                  </strong>
+                </p>
+                <p>
+                  Verification passed: {latencyResult.detected}/7 signals
+                  detected, variation {latencyResult.spreadMs} ms, remaining
+                  delay within {latencyResult.verificationMs} ms.
+                </p>
+                <p>
+                  This checks the audio path. Singing detection remains
+                  experimental. Re-measure after changing your microphone,
+                  headphones or audio routing.
+                </p>
+              </div>
+            )}
+            <p className="menu-note">
+              Test audio stays on this device and is discarded. Microphone
+              capture ends after the test or when cancelled. The correction is
+              saved only when you apply it.
+            </p>
+            <div className="row">
+              <button
+                disabled={
+                  measuringLatency ||
+                  inputBusy ||
+                  !settings.device ||
+                  settings.device === "off" ||
+                  !!settings.speakers ||
+                  !devices.some((device) => device.deviceId === settings.device)
+                }
+                onClick={() => void runLatencyMeasurement()}
+              >
+                {latencyResult ? "Measure again" : "Start measurement"}
+              </button>
+              {latencyResult && (
+                <button disabled={measuringLatency} onClick={applyLatency}>
+                  Use correction and enable timing
+                </button>
+              )}
+              <button onClick={cancelLatency}>
+                {measuringLatency ? "Cancel measurement" : "Close"}
+              </button>
+            </div>
+          </dialog>
           <Score
             piece={piece}
             zoom={scoreZoom}
@@ -1271,12 +1719,20 @@ export default function App() {
                 .previewNote(midi, settings.instrument)
                 .catch((e) => setError(message(e)));
             }}
-            onRange={(range) => {
-              const from = range?.from ?? 0,
-                to = range?.to ?? piece.bars.length - 1;
-              change({ from, to, loop: !!range });
-              setTime(secondsAt(piece, piece.bars[from].start));
+            onSeek={seekScore}
+            passageDisabled={starting}
+            onMetronome={() => {
+              const enabled = !settings.metronome;
+              change({ metronome: enabled });
+              engine.current.setMetronome(enabled);
+              if (startConfig.current)
+                startConfig.current.s.metronome = enabled;
             }}
+            onInitialPitches={() =>
+              change({ initialPitches: settings.initialPitches === false })
+            }
+            onSpeed={changeSpeed}
+            onRange={selectPassage}
           />
           <div className="feedback" role="status">
             {noteResults.length > 0 && (
@@ -1358,66 +1814,7 @@ export default function App() {
           </div>
         </>
       ) : (
-        <main>
-          <h1>Your practice, kept here.</h1>
-          <div className="setup-grid">
-            <section className="panel">
-              <h3>Backup & restore</h3>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={includeAudio}
-                  onChange={(e) => setIncludeAudio(e.target.checked)}
-                />
-                Include voice recordings
-              </label>
-              <div className="row" style={{ marginTop: 16 }}>
-                <button
-                  onClick={() =>
-                    void store
-                      .backup(lib, includeAudio)
-                      .catch((e) => setError(message(e)))
-                  }
-                >
-                  Export backup
-                </button>
-                <button onClick={() => restoreFile.current?.click()}>
-                  Restore backup
-                </button>
-              </div>
-              <input
-                hidden
-                type="file"
-                accept=".json"
-                ref={restoreFile}
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  e.target.value = "";
-                  if (!f) return;
-                  try {
-                    if (f.size > 100 * 1024 * 1024)
-                      throw new Error("Backup exceeds the 100 MB limit.");
-                    await writes.current;
-                    const next = await store.restore(
-                      await f.text(),
-                      libRef.current,
-                    );
-                    setLib(next);
-                    libRef.current = next;
-                    setNotice(
-                      "Backup restored as new profiles and pieces. Existing data was preserved.",
-                    );
-                  } catch (e) {
-                    setError("Restore failed: " + message(e));
-                  }
-                }}
-              />
-              <p className="muted">
-                Clearing browser data can erase everything stored here. Restore
-                adds new copies and never replaces existing data.
-              </p>
-            </section>
-          </div>
+        <main className="history-page">
           <section className="panel history">
             <h3>Practice history</h3>
             {lib.attempts.length ? (

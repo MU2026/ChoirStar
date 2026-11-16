@@ -265,7 +265,7 @@ footer a {
   border-bottom: 1px solid var(--line);
   flex: none;
 }
-.practice-header > div:nth-child(2) {
+.practice-title {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -854,6 +854,7 @@ audio {
   color: var(--accent);
 }
 .top-transport {
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1307,4 +1308,322 @@ audio {
   padding-left: 0;
   flex: 1;
   min-width: 0;
+}
+
+.active-verse-background {
+  fill: #f4df9b;
+  fill-opacity: 0.45;
+}
+.verse-choice {
+  padding: 0 5px;
+  min-height: 20px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+}
+.verse-choice[data-active="true"] {
+  background: #f4df9b;
+  border-radius: 3px;
+  font-weight: 700;
+}
+.verse-choice[aria-pressed="true"] {
+  text-decoration: underline;
+}
+
+.import-warnings-dialog > .row {
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+.settings-popup {
+  left: 0;
+  right: auto;
+  top: calc(100% + 6px);
+  width: min(205px, calc(100vw - 24px));
+  padding: 4px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.3;
+  overflow: visible;
+}
+.menu-branch {
+  position: relative;
+}
+.settings-popup .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 25px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 400;
+  text-align: left;
+  white-space: nowrap;
+}
+.settings-popup .menu-item:hover:not(:disabled),
+.settings-popup .menu-item:focus-visible,
+.settings-popup .menu-item[aria-expanded="true"] {
+  background: var(--accent);
+  color: white;
+  outline: none;
+}
+.menu-check {
+  width: 12px;
+  flex: none;
+}
+.menu-arrow {
+  margin-left: auto;
+  padding-left: 14px;
+  font-size: 16px;
+  line-height: 1;
+}
+.menu-hint {
+  opacity: 0.65;
+  font-size: 11px;
+  margin-left: 6px;
+}
+.menu-flyout {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  z-index: 1;
+  width: max-content;
+  min-width: 200px;
+  max-width: calc(100vw - 16px);
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fffefa;
+  color: #243635;
+  box-shadow: 0 6px 20px #22352c30;
+}
+.menu-separator {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 7px;
+}
+.settings-popup .menu-slider {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px;
+  margin: 0;
+  padding: 6px 10px;
+  min-width: 200px;
+}
+.settings-popup .menu-slider input {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin: 2px 0;
+}
+.settings-popup .menu-note {
+  max-width: 260px;
+  margin: 4px 10px;
+  font-size: 10px;
+  line-height: 1.3;
+  color: #62716c;
+}
+
+.practice-menu-anchor {
+  position: relative;
+  flex: none;
+}
+
+/* A shared mixer toggle reveals all rows without covering the notation. */
+.staff-label .part-controls,
+.part-controls {
+  display: flex;
+  align-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  overflow: visible;
+}
+.staff-label .part-controls.mixer-open,
+.part-controls.mixer-open {
+  flex-basis: 264px;
+  width: 264px;
+}
+.part-handle {
+  flex: 0 0 44px;
+  width: 44px;
+  min-height: 25px;
+  padding: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.part-handle:hover {
+  background: #e1eae3;
+}
+.part-mix-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #243b2f;
+}
+.part-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 24px;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  border-radius: 4px;
+}
+.part-icon[aria-pressed="true"] {
+  background: #d5e7d8;
+  color: var(--accent);
+}
+.part-controls .part-icon svg {
+  width: 20px;
+  height: 20px;
+}
+.part-mix-row input[type="range"] {
+  width: 90px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.bar-ruler .ruler-label {
+  padding: 3px 8px;
+}
+.mixer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 3px 6px;
+  font-size: 12px;
+  border: 0;
+  background: transparent;
+}
+.mixer-toggle[aria-expanded="true"] {
+  background: #d5e7d8;
+}
+
+.history-back {
+  margin-left: auto;
+}
+.library-root {
+  margin-top: 0;
+  padding-top: 0;
+  border: 0;
+}
+.history-page {
+  max-width: none;
+  padding-top: 18px;
+}
+.history-page .history {
+  margin-top: 0;
+  padding: 14px 18px;
+}
+.history-page .history h3 {
+  margin-bottom: 8px;
+}
+.history-page .review-row {
+  padding: 6px 0;
+  gap: 12px;
+  font-size: 13px;
+}
+.history-page .review-row p {
+  margin: 2px 0 0;
+  font-size: 11px;
+}
+.history-page .review-row .row {
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.history-page .review-row button {
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+}
+.part-mix-row input[type="range"]:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.bar-ruler .ruler-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.mixer-tempo {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+}
+.mixer-tempo button {
+  padding: 2px 5px;
+  border: 0;
+  background: transparent;
+  font-size: 16px;
+}
+.mixer-tempo output {
+  min-width: 54px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.mixer-tempo small {
+  font-size: 9px;
+}
+
+.metronome-toggle {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 28px;
+  padding: 3px;
+  border: 0;
+  background: transparent;
+  border-radius: 4px;
+}
+.metronome-toggle[aria-pressed="true"] {
+  background: #d5e7d8;
+  color: var(--accent);
+}
+
+/* The opaque fixed header masks all scrolling bar numbers and selections. */
+.bar-ruler > span.ruler-label {
+  z-index: 5;
+  overflow: hidden;
+  background: #fffdf8;
+  isolation: isolate;
+}
+
+.latency-dialog {
+  width: min(540px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+  background: #fffdf8;
+  color: inherit;
+  font-size: 14px;
+}
+.latency-dialog::backdrop {
+  background: #172a2877;
+}
+.latency-dialog h2 {
+  margin-top: 0;
+}
+.latency-dialog progress {
+  width: 100%;
+}
+.latency-dialog .row {
+  flex-wrap: wrap;
 }

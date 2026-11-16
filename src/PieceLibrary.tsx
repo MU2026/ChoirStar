@@ -36,6 +36,7 @@ export function PieceLibrary({
   const [before, setBefore] = useState("");
   const [name, setName] = useState("");
   const [announcement, setAnnouncement] = useState("");
+  const [rootOpen, setRootOpen] = useState(true);
   const [closed, setClosed] = useState<Set<string>>(new Set());
   function apply(next: LibraryLayout, message: string) {
     if (next === layout) return;
@@ -308,9 +309,8 @@ export function PieceLibrary({
   }
   return (
     <>
-      <div className="library-toolbar">
-        <button onClick={() => edit("create")}>New folder</button>
-        {undo && (
+      {undo && (
+        <div className="library-toolbar">
           <button
             onClick={() => {
               onChange(undo);
@@ -320,11 +320,8 @@ export function PieceLibrary({
           >
             Undo organization change
           </button>
-        )}
-        <span className="muted">
-          Drag rows to reorder; drop on a folder to move inside.
-        </span>
-      </div>
+        </div>
+      )}
       {editor && (
         <form
           className="library-editor"
@@ -390,7 +387,7 @@ export function PieceLibrary({
                     setBefore("");
                   }}
                 >
-                  <option value="">Top level</option>
+                  <option value="">Library</option>
                   {layout.items
                     .filter(
                       (n) =>
@@ -438,7 +435,41 @@ export function PieceLibrary({
           </button>
         </form>
       )}
-      <div className="piece-list">{rows(null)}</div>
+      <details
+        className="piece-group library-root"
+        open={rootOpen}
+        onToggle={(e) => setRootOpen(e.currentTarget.open)}
+      >
+        <summary
+          className="piece-row"
+          title="Library · drag rows to reorder or drop here to move to the root"
+          onDragOver={(e) => {
+            if (dragging) {
+              e.preventDefault();
+              setDrop(null);
+            }
+          }}
+          onDrop={(e) => finishDrop(e)}
+        >
+          <span className="folder-title">Library</span>
+          <span className="library-actions">
+            <button
+              type="button"
+              className="library-action"
+              aria-label="New folder in Library"
+              title="New folder in Library"
+              onClick={(e) => {
+                e.preventDefault();
+                setRootOpen(true);
+                edit("create");
+              }}
+            >
+              +
+            </button>
+          </span>
+        </summary>
+        <div className="piece-list piece-group-content">{rows(null)}</div>
+      </details>
       {dragging && (
         <div
           className="root-drop"
@@ -449,7 +480,7 @@ export function PieceLibrary({
           }}
           onDrop={(e) => finishDrop(e)}
         >
-          Drop here to move to top level
+          Drop here to move to Library
         </div>
       )}
       <p className="library-status" role="status">

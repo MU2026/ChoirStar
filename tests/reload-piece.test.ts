@@ -69,6 +69,9 @@ it("refreshes lyrics and clefs without changing library, settings or history ide
       length: 480,
     },
   ];
+  imported.bars[2].lyricPass = 2;
+  imported.parts[0].notes[0].tupletActual = 3;
+  imported.parts[0].notes[0].tupletNormal = 2;
   imported.parts[0].clef = "treble";
   imported.parts[0].clefOctaveChange = -1;
   const next = reloadPiece(lib, p.id, imported),
@@ -78,6 +81,8 @@ it("refreshes lyrics and clefs without changing library, settings or history ide
   expect(updated.title).toBe(p.title);
   expect(updated.parts[0].lyrics).toEqual(imported.parts[0].lyrics);
   expect(updated.parts[0].clefOctaveChange).toBe(-1);
+  expect(updated.bars[2].lyricPass).toBe(2);
+  expect(updated.parts[0].notes[0].tupletActual).toBe(3);
   expect(updated.parts.flatMap((p) => p.notes.map((n) => n.id))).toEqual(
     p.parts.flatMap((p) => p.notes.map((n) => n.id)),
   );

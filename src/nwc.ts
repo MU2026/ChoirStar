@@ -366,6 +366,9 @@ export function nwcToMusicXml(commands: NwcCommand[], filename: string) {
           warnings.add("NWC grace notes are omitted.");
           continue;
         }
+        const triplet = dur.some((value) =>
+          /^Triplet(?:=(?:First|End))?$/.test(value),
+        );
         const length =
           values[dur[0]] *
           DIV *
@@ -374,7 +377,7 @@ export function nwcToMusicXml(commands: NwcCommand[], filename: string) {
             : dur.includes("Dotted")
               ? 1.5
               : 1) *
-          (dur.includes("Triplet") ? 2 / 3 : 1);
+          (triplet ? 2 / 3 : 1);
         const positions = type === "Rest" ? [""] : (f.Pos || "").split(",");
         if (!positions.length || positions.length > 64)
           throw new Error("Invalid NWC chord size.");
@@ -425,6 +428,11 @@ export function nwcToMusicXml(commands: NwcCommand[], filename: string) {
           ties.delete(identity);
           if (match[3]) ties.add(identity);
           pending += `<note>${index ? "<chord/>" : ""}<pitch><step>${step}</step><alter>${alter}</alter><octave>${octave}</octave></pitch><duration>${length}</duration>${stop ? '<tie type="stop"/>' : ""}${match[3] ? '<tie type="start"/>' : ""}`;
+          if (triplet)
+            pending +=
+              "<time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>";
+          if (!index && (slurOut || slurContinuation))
+            pending += `<notations>${slurContinuation && !slurOut ? '<slur type="stop"/>' : ""}${slurOut && !slurContinuation ? '<slur type="start"/>' : ""}</notations>`;
           const lyricAllowed =
             !index &&
             (!stop || alwaysLyric) &&
