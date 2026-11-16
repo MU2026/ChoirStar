@@ -5,6 +5,7 @@ import {
   parseWebsiteExport,
   scanWebsite,
   websiteBookmarklet,
+  websiteHelperLoader,
   type WebsiteCatalogue,
   type WebsiteEntry,
 } from "./website";
@@ -43,6 +44,12 @@ export function WebsiteLibrary({
   const helperCode = useRef<HTMLTextAreaElement>(null);
   const [copyStatus, setCopyStatus] = useState("");
   const [bookmarklet] = useState(websiteBookmarklet);
+  const [mobileBookmarklet] = useState(() =>
+    websiteHelperLoader(
+      new URL(`${import.meta.env.BASE_URL}website-helper.js`, location.href)
+        .href,
+    ),
+  );
   const upload = useRef<HTMLInputElement>(null);
   const localScore = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<WebsiteEntry | null>(null);
@@ -52,7 +59,7 @@ export function WebsiteLibrary({
   async function copyHelper() {
     setCopyStatus("");
     try {
-      await navigator.clipboard.writeText(bookmarklet);
+      await navigator.clipboard.writeText(mobileBookmarklet);
       setCopyStatus(
         "Helper code copied. Paste it into the bookmark's address field.",
       );
@@ -277,13 +284,19 @@ export function WebsiteLibrary({
               <textarea
                 ref={helperCode}
                 readOnly
-                value={bookmarklet}
+                value={mobileBookmarklet}
                 rows={3}
                 spellCheck={false}
                 onFocus={(e) => e.currentTarget.select()}
               />
             </label>
             {copyStatus && <p role="status">{copyStatus}</p>}
+            <p>
+              This short code loads the export helper from ChoirStar when you
+              run it. An internet connection is required. The helper runs on the
+              source page; scores, passwords and cookies are not sent to
+              ChoirStar. Replace the old long code with this short version.
+            </p>
             <p>
               Mobile browser support varies. If no export confirmation appears,
               the browser or website may block the helper. You can also export

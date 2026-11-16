@@ -5,6 +5,7 @@ import {
   parseWebsiteExport,
   fetchLimited,
   websiteBookmarklet,
+  websiteHelperLoader,
 } from "../src/website";
 const parse = (html: string) =>
   new DOMParser().parseFromString(
@@ -18,6 +19,31 @@ const bookmarkletScript = () =>
     .replace(/^void\(/, "")
     .slice(0, -1);
 afterEach(() => vi.unstubAllGlobals());
+it("keeps the mobile bookmark short and loads only the public helper without a referrer", () => {
+  const address = "https://mu2026.github.io/ChoirStar/website-helper.js";
+  const code = websiteHelperLoader(address);
+  expect(code.length).toBeLessThan(1000);
+  const script = {} as HTMLScriptElement;
+  const appendChild = vi.fn();
+  vi.stubGlobal("document", {
+    createElement: vi.fn(() => script),
+    head: { appendChild },
+  });
+  const alert = vi.fn();
+  vi.stubGlobal("alert", alert);
+  new Function(decodeURIComponent(code.slice("javascript:".length)))();
+  expect(script.src).toBe(address);
+  expect(script.referrerPolicy).toBe("no-referrer");
+  expect(script.crossOrigin).toBe("anonymous");
+  expect(appendChild).toHaveBeenCalledWith(script);
+  (script.onerror as () => void)();
+  expect(alert).toHaveBeenCalledWith(
+    expect.stringContaining("blocked or unavailable"),
+  );
+  expect(() =>
+    websiteHelperLoader("https://user:password@example.com/helper.js"),
+  ).toThrow();
+});
 it("finds supported links, resolves URLs, keeps heading and list categories, rejects unsafe schemes", () => {
   const result = scanWebsite(
     parse(

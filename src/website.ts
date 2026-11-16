@@ -257,6 +257,12 @@ export function parseWebsiteExport(text: string) {
 }
 
 // This helper runs only when the user invokes their bookmark on the source page.
+export function websiteHelperLoader(address: string) {
+  const url = webUrl.parse(address);
+  const script = `void(()=>{const s=document.createElement('script');s.src=${JSON.stringify(url)};s.referrerPolicy='no-referrer';s.crossOrigin='anonymous';s.onerror=()=>alert('ChoirStar helper blocked or unavailable. Try individual score downloads.');document.head.appendChild(s)})()`;
+  return "javascript:" + encodeURIComponent(script);
+}
+
 export function websiteBookmarklet() {
   const script =
     "void((" +
