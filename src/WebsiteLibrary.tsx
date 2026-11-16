@@ -38,6 +38,12 @@ export function WebsiteLibrary({
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
+  const [mobileHelp] = useState(
+    () =>
+      /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+      // iPadOS can identify itself as a Mac when requesting desktop websites.
+      (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1),
+  );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<Record<string, string>>({});
   const bookmark = useRef<HTMLAnchorElement>(null);
@@ -240,14 +246,14 @@ export function WebsiteLibrary({
             e.target.value = "";
           }}
         />
-        <details className="website-help">
+        <details className="website-help" open>
           <summary>Signed-in or blocked website?</summary>
           <p>
             Install the Export to ChoirStar helper once in the browser you use
             to sign in to the source website. Replace its code after updating
             ChoirStar.
           </p>
-          <details>
+          <details open={mobileHelp}>
             <summary>Phone or tablet: install without dragging</summary>
             <ol>
               <li>
@@ -304,31 +310,33 @@ export function WebsiteLibrary({
               or download individual scores and use Import → Local file.
             </p>
           </details>
-          <p>Desktop installation and export:</p>
-          <ol>
-            <li>
-              On a desktop browser, drag{" "}
-              <a ref={bookmark} onClick={(e) => e.preventDefault()}>
-                Export to ChoirStar
-              </a>{" "}
-              to your bookmarks bar. Replace any older copy of this bookmark
-              after updating ChoirStar.
-            </li>
-            <li>
-              Open the repertoire page and sign in there. Run the bookmark and
-              confirm the local export. Keep the page open while it downloads
-              the scores. The export is saved to your browser's download folder
-              as choirstar-[website hostname].json (on a phone or tablet, check
-              Downloads in your file manager). If no confirmation appears, the
-              website may block bookmarklets; use the saved HTML alternative
-              below.
-            </li>
-            <li>
-              Here, choose <strong>Import website file</strong> and select{" "}
-              <strong>choirstar-[website hostname].json</strong>. Select scores
-              from the list to add them to your pieces.
-            </li>
-          </ol>
+          <details open={!mobileHelp}>
+            <summary>Desktop installation and export</summary>
+            <ol>
+              <li>
+                On a desktop browser, drag{" "}
+                <a ref={bookmark} onClick={(e) => e.preventDefault()}>
+                  Export to ChoirStar
+                </a>{" "}
+                to your bookmarks bar. Replace any older copy of this bookmark
+                after updating ChoirStar.
+              </li>
+              <li>
+                Open the repertoire page and sign in there. Run the bookmark and
+                confirm the local export. Keep the page open while it downloads
+                the scores. The export is saved to your browser's download
+                folder as choirstar-[website hostname].json (on a phone or
+                tablet, check Downloads in your file manager). If no
+                confirmation appears, the website may block bookmarklets; use
+                the saved HTML alternative below.
+              </li>
+              <li>
+                Here, choose <strong>Import website file</strong> and select{" "}
+                <strong>choirstar-[website hostname].json</strong>. Select
+                scores from the list to add them to your pieces.
+              </li>
+            </ol>
+          </details>
           <p>
             No password or cookies are copied. The helper downloads only linked
             scores; it does not upload anything. Some websites block helpers or
