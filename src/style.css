@@ -1060,6 +1060,18 @@ audio {
 .website-help li {
   margin-bottom: 8px;
 }
+.website-helper-code {
+  display: block;
+  margin-top: 12px;
+}
+.website-helper-code textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 6px;
+  font-size: 16px;
+  resize: vertical;
+}
 .website-help a {
   display: inline-block;
   padding: 3px 8px;

@@ -40,12 +40,30 @@ export function WebsiteLibrary({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<Record<string, string>>({});
   const bookmark = useRef<HTMLAnchorElement>(null);
+  const helperCode = useRef<HTMLTextAreaElement>(null);
+  const [copyStatus, setCopyStatus] = useState("");
+  const [bookmarklet] = useState(websiteBookmarklet);
   const upload = useRef<HTMLInputElement>(null);
   const localScore = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<WebsiteEntry | null>(null);
   useEffect(() => {
-    bookmark.current?.setAttribute("href", websiteBookmarklet());
-  }, []);
+    bookmark.current?.setAttribute("href", bookmarklet);
+  }, [bookmarklet]);
+  async function copyHelper() {
+    setCopyStatus("");
+    try {
+      await navigator.clipboard.writeText(bookmarklet);
+      setCopyStatus(
+        "Helper code copied. Paste it into the bookmark's address field.",
+      );
+    } catch {
+      helperCode.current?.focus();
+      helperCode.current?.select();
+      setCopyStatus(
+        "Automatic copying is unavailable. Touch and hold the selected code and choose Copy.",
+      );
+    }
+  }
   const catalogue = catalogues.find((c) => c.url === active) || catalogues[0];
   function save(c: WebsiteCatalogue) {
     const checked = catalogueSchema.parse(c);
@@ -217,6 +235,63 @@ export function WebsiteLibrary({
         />
         <details className="website-help">
           <summary>Signed-in or blocked website?</summary>
+          <p>
+            Install the Export to ChoirStar helper once in the browser you use
+            to sign in to the source website. Replace its code after updating
+            ChoirStar.
+          </p>
+          <details>
+            <summary>Phone or tablet: install without dragging</summary>
+            <ol>
+              <li>
+                Bookmark this page using your browser's bookmark menu (not Add
+                to Home Screen). Name it <strong>Export to ChoirStar</strong>.
+              </li>
+              <li>
+                Choose <strong>Copy helper code</strong> below. Open your
+                browser's bookmarks, edit the bookmark you just created and
+                replace its entire address with the copied code. Keep the
+                initial <strong>javascript:</strong> and save.
+              </li>
+              <li>
+                Open the repertoire page and sign in in the same browser. In
+                Safari, open the helper from Bookmarks while that page is
+                visible. In Chrome on Android, type{" "}
+                <strong>Export to ChoirStar</strong> in the address bar and
+                choose the saved bookmark suggestion. Do not paste the helper
+                code into a search box.
+              </li>
+              <li>
+                Confirm the export and keep the source page open until it
+                finishes. Return here, choose{" "}
+                <strong>Import website file</strong>, select{" "}
+                <strong>choirstar-[website hostname].json</strong> from
+                Downloads and select the scores to import.
+              </li>
+            </ol>
+            <button type="button" onClick={() => void copyHelper()}>
+              Copy helper code
+            </button>
+            <label className="website-helper-code">
+              Helper code (select and copy manually if needed)
+              <textarea
+                ref={helperCode}
+                readOnly
+                value={bookmarklet}
+                rows={3}
+                spellCheck={false}
+                onFocus={(e) => e.currentTarget.select()}
+              />
+            </label>
+            {copyStatus && <p role="status">{copyStatus}</p>}
+            <p>
+              Mobile browser support varies. If no export confirmation appears,
+              the browser or website may block the helper. You can also export
+              on a desktop and transfer the JSON file privately to this device,
+              or download individual scores and use Import → Local file.
+            </p>
+          </details>
+          <p>Desktop installation and export:</p>
           <ol>
             <li>
               On a desktop browser, drag{" "}
@@ -227,11 +302,12 @@ export function WebsiteLibrary({
               after updating ChoirStar.
             </li>
             <li>
-              Open the repertoire page and sign in there. Click the bookmark and
+              Open the repertoire page and sign in there. Run the bookmark and
               confirm the local export. Keep the page open while it downloads
               the scores. The export is saved to your browser's download folder
-              as choirstar-[website hostname].json. If no confirmation appears,
-              the website may block bookmarklets; use the saved HTML alternative
+              as choirstar-[website hostname].json (on a phone or tablet, check
+              Downloads in your file manager). If no confirmation appears, the
+              website may block bookmarklets; use the saved HTML alternative
               below.
             </li>
             <li>
