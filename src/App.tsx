@@ -35,6 +35,7 @@ import * as store from "./storage";
 import { noteLabel } from "./vendor/openvox/core/music/notes";
 import { Score } from "./views";
 import { importScore } from "./score-import";
+import { importPiece } from "./import-piece";
 import { reloadPiece } from "./reload-piece";
 import { fetchReloadFile } from "./reload-source";
 const initial: Library = {
@@ -304,11 +305,8 @@ export default function App() {
     entry: WebsiteEntry,
     catalogue: WebsiteCatalogue,
   ) {
-    if (libRef.current.pieces.some((p) => p.website?.url === entry.url)) return;
-    if (libRef.current.pieces.length >= 200)
-      throw new Error(
-        "The library limit is 200 pieces. Delete unused pieces before importing more.",
-      );
+    if (libRef.current.pieces.some((p) => p.website?.url === entry.url))
+      return false;
     const p = await importScore(f);
     p.website = {
       url: entry.url,
@@ -316,17 +314,30 @@ export default function App() {
       category: entry.category,
     };
     p.title = entry.title;
-    update({ ...libRef.current, pieces: [...libRef.current.pieces, p] });
+    const result = importPiece(libRef.current, p);
+    if (result.duplicate) return false;
+    update(result.library);
     if (!pieceId) {
       setPieceId(p.id);
       setTime(0);
     }
+    return true;
   }
   async function importFile(f: File) {
     try {
       setError("");
       const p = await importScore(f);
-      update({ ...libRef.current, pieces: [...libRef.current.pieces, p] });
+      const result = importPiece(libRef.current, p);
+      if (result.duplicate) {
+        setNotice(
+          `Already in your library as “${result.piece.title}”. No duplicate was added. Use Reload on the existing score to refresh it.`,
+        );
+        setPieceId(result.piece.id);
+        setTime(0);
+        setScreen("prepare");
+        return;
+      }
+      update(result.library);
       setPieceId(p.id);
       setTime(0);
       setScreen("prepare");
@@ -1961,11 +1972,11 @@ export default function App() {
           }
           onImport={importWebsiteScore}
           onClose={() => setShowWebsites(false)}
-          onImported={(count) => {
+          onImported={(count, skipped = 0) => {
             setShowWebsites(false);
             setScreen("prepare");
             setNotice(
-              `Imported ${count} ${count === 1 ? "score" : "scores"}. Choose a piece to practise.`,
+              `Imported ${count} ${count === 1 ? "score" : "scores"}. ${skipped ? `${skipped} already in your library; no duplicates added. ` : ""}Choose a piece to practise.`,
             );
           }}
           onSave={(catalogue) => {

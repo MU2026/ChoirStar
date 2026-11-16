@@ -33,18 +33,12 @@ const EngravedBar = memo(function EngravedBar({
   notes,
   results,
   disabled,
-  seekDisabled,
-  barStart,
-  onSeek,
   onNote,
 }: {
   svg: string;
   notes: Note[];
   results: NoteResult[];
   disabled: boolean;
-  seekDisabled: boolean;
-  barStart: number;
-  onSeek: (tick: number) => void;
   onNote: (midi: number) => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
@@ -65,13 +59,10 @@ const EngravedBar = memo(function EngravedBar({
         );
         group.dataset.graded = String(!!result?.grade);
         group.setAttribute("role", "button");
-        group.setAttribute("tabindex", seekDisabled ? "-1" : "0");
-        group.setAttribute("aria-disabled", String(seekDisabled));
+        group.setAttribute("tabindex", disabled ? "-1" : "0");
+        group.setAttribute("aria-disabled", String(disabled));
         const description = `${noteLabel(note.midi)}${result ? ` · ${result.grade ?? "Not assessed"} · ${result.detail ?? ""}` : ""}`;
-        group.setAttribute(
-          "aria-label",
-          `${disabled ? "Move cursor to" : "Play and move cursor to"} ${description}`,
-        );
+        group.setAttribute("aria-label", `Play ${description}`);
         group.querySelector("title")?.remove();
         const title = document.createElementNS(
           "http://www.w3.org/2000/svg",
@@ -80,25 +71,38 @@ const EngravedBar = memo(function EngravedBar({
         title.textContent = description;
         group.prepend(title);
       });
-  }, [svg, notes, results, disabled, seekDisabled]);
-  const play = (target: EventTarget | null, seek = false) => {
-    if (seekDisabled || !(target instanceof Element)) return;
+  }, [svg, notes, results, disabled]);
+  const play = (target: EventTarget | null) => {
+    if (disabled || !(target instanceof Element)) return;
     const id = target.closest<SVGGElement>('[data-event-kind="note"]')?.dataset
       .eventId;
     const note = notes.find((n) => n.id === id);
-    if (note) {
-      if (!disabled) onNote(note.midi);
-      if (seek) onSeek(Math.max(barStart, note.tick));
-    }
+    if (note) onNote(note.midi);
   };
   return (
     <div
       ref={root}
-      onClick={(e) => play(e.target)}
+      onPointerDown={(e) => {
+        if (
+          e.target instanceof Element &&
+          e.target.closest('[data-event-kind="note"]')
+        )
+          e.preventDefault();
+      }}
+      onClick={(e) => {
+        if (
+          e.target instanceof Element &&
+          e.target.closest('[data-event-kind="note"]')
+        ) {
+          e.stopPropagation();
+          play(e.target);
+        }
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          play(e.target, true);
+          e.stopPropagation();
+          play(e.target);
         }
       }}
       dangerouslySetInnerHTML={{ __html: svg }}
@@ -461,7 +465,7 @@ export function Score({
           passageDisabled ||
           !(event.target instanceof Element) ||
           event.target.closest(
-            ".bar-ruler, .staff-label, .lyric-label, .collapsed-staff-label, button, input, select, a",
+            ".bar-ruler, .staff-label, .lyric-label, .collapsed-staff-label, button, input, select, a, [data-event-kind='note']",
           )
         )
           return;
@@ -477,15 +481,7 @@ export function Score({
         const row = cells.find((row) => row.part.id === partId) ?? cells[0];
         const cell = row?.bars.find((cell) => cell.index === index);
         if (!cell) return;
-        const noteId = event.target.closest<SVGGElement>(
-          '[data-event-kind="note"]',
-        )?.dataset.eventId;
-        const note = row.part.notes.find((note) => note.id === noteId);
-        onSeek(
-          note
-            ? Math.max(piece.bars[index].start, note.tick)
-            : cell.tickAtX(x - index * cellWidth),
-        );
+        onSeek(cell.tickAtX(x - index * cellWidth));
       }}
       onScroll={(e) =>
         setScrollBar(Math.floor(e.currentTarget.scrollLeft / cellWidth))
@@ -810,9 +806,6 @@ export function Score({
                         notes={part.notes}
                         results={part.id === feedbackPart ? results : noResults}
                         disabled={controlsDisabled}
-                        seekDisabled={passageDisabled}
-                        barStart={piece.bars[cell.index].start}
-                        onSeek={onSeek}
                         onNote={onNote}
                       />
                       {lyrics.verses.length > 0 && (

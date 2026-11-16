@@ -104,6 +104,10 @@ const librarySchema = z.object({
             category: z.array(text).max(12),
           })
           .optional(),
+        fileHash: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
         source: z.enum(["midi", "musicxml", "nwc"]).optional(),
         importWarnings: z.array(text).optional(),
         ppq: number.positive(),

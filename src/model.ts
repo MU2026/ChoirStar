@@ -40,6 +40,7 @@ export interface Bar {
   meter: [number, number];
 }
 export interface Piece {
+  fileHash?: string;
   website?: { url: string; page: string; category: string[] };
   source?: "midi" | "musicxml" | "nwc";
   importWarnings?: string[];

@@ -19,14 +19,14 @@ export function WebsiteLibrary({
 }: {
   catalogues: WebsiteCatalogue[];
   imported: Set<string>;
-  onImported: (count: number) => void;
+  onImported: (count: number, skipped?: number) => void;
   onBusyChange: (busy: boolean) => void;
   onSave: (catalogue: WebsiteCatalogue) => void;
   onImport: (
     file: File,
     entry: WebsiteEntry,
     catalogue: WebsiteCatalogue,
-  ) => Promise<void>;
+  ) => Promise<boolean>;
 }) {
   const [address, setAddress] = useState(catalogues[0]?.url || "");
   const [active, setActive] = useState("");
@@ -117,10 +117,16 @@ export function WebsiteLibrary({
     setError("");
     setStatus("");
     let count = 0;
+    let skipped = 0;
     const failed: string[] = [];
     for (const entry of new Map(entries.map((e) => [e.url, e])).values()) {
-      if (imported.has(entry.url)) continue;
-      setStatus(`Importing ${count + failed.length + 1} of ${entries.length}…`);
+      if (imported.has(entry.url)) {
+        skipped++;
+        continue;
+      }
+      setStatus(
+        `Importing ${count + skipped + failed.length + 1} of ${entries.length}…`,
+      );
       try {
         let blob: Blob;
         if (files[entry.url])
@@ -135,14 +141,15 @@ export function WebsiteLibrary({
             );
           blob = await response.blob();
         }
-        await onImport(new File([blob], entry.filename), entry, catalogue);
-        count++;
+        if (await onImport(new File([blob], entry.filename), entry, catalogue))
+          count++;
+        else skipped++;
       } catch {
         failed.push(entry.title);
       }
     }
     setStatus(
-      `Imported ${count} scores. ${failed.length ? `${failed.length} could not be imported.` : ""}`,
+      `Imported ${count} scores. ${skipped ? `${skipped} already in your library; no duplicates added. ` : ""}${failed.length ? `${failed.length} could not be imported.` : ""}`,
     );
     if (failed.length)
       setError(
@@ -150,7 +157,7 @@ export function WebsiteLibrary({
       );
     setSelected(new Set());
     setBusy(false);
-    if (count > 0 && !failed.length) onImported(count);
+    if (count > 0 && !failed.length) onImported(count, skipped);
   }
   const visible = (catalogue?.entries || []).filter((e) =>
     `${e.title} ${e.filename} ${e.category.join(" ")}`
@@ -364,9 +371,13 @@ export function WebsiteLibrary({
             setBusy(true);
             setError("");
             try {
-              await onImport(f, pending, catalogue);
-              setStatus(`Imported ${pending.title}.`);
-              onImported(1);
+              const added = await onImport(f, pending, catalogue);
+              setStatus(
+                added
+                  ? `Imported ${pending.title}.`
+                  : "This score is already in your library. No duplicate was added.",
+              );
+              if (added) onImported(1);
             } catch (err) {
               setError(
                 err instanceof Error ? err.message : "Could not import score.",
